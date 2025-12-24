@@ -22,32 +22,44 @@ def RootApp():
 
     query, set_query = hooks.use_state("")
     results, set_results = hooks.use_state([])
+    is_loading, set_is_loading = hooks.use_state(False)
 
     async def submit_search():
         q_value = query.strip()
         if not q_value:
             set_results([])
+            set_is_loading(False)
             return
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                "http://127.0.0.1:5000/api/search",
-                params={"q": q_value},
-            )
-            set_results(resp.json())
+
+        set_is_loading(True)
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "http://127.0.0.1:5000/api/search",
+                    params={"q": q_value},
+                )
+                data = resp.json()
+                # If backend returns an error object, handle minimally
+                if isinstance(data, dict) and "error" in data:
+                    set_results([])
+                else:
+                    set_results(data)
+        finally:
+            set_is_loading(False)
 
     async def on_input(event):
         # Only update local query text
         set_query(event["target"]["value"])
 
     async def on_keydown(event):
-        # Trigger search only when Enter is pressed[web:112][web:122]
+        # Trigger search only when Enter is pressed[web:127]
         if event.get("key") == "Enter":
             await submit_search()
 
     def switch_page(page_name: str):
         set_current_page(page_name)
 
-    # Page 1: search UI (no button)
+    # Page 1: search UI
     page1_content = html.div(
         {"style": box_style},
         html.h1(
@@ -71,7 +83,6 @@ def RootApp():
                     "on_keydown": on_keydown,
                     "style": {
                         **search_input_style,
-                        # keep width behavior reasonable without a button
                         "max_width": "600px",
                     },
                 }
@@ -80,28 +91,39 @@ def RootApp():
         html.div(
             {"style": results_container_style},
             (
-                html.ul(
-                    [
-                        html.li(
-                            html.div(
-                                html.a(
-                                    {
-                                        "href": r["url"],
-                                        "style": result_title_style,
-                                    },
-                                    r["title"],
-                                ),
+                # 1) Show "Processing query..." while waiting
+                html.p("Processing query...")
+                if is_loading
+                # 2) Once loaded, show results (if any)
+                else (
+                    html.ul(
+                        [
+                            html.li(
                                 html.div(
-                                    {"style": result_url_style},
-                                    r["url"],
-                                ),
+                                    html.a(
+                                        {
+                                            "href": r["url"],
+                                            "style": result_title_style,
+                                        },
+                                        r["title"],
+                                    ),
+                                    html.div(
+                                        {"style": result_url_style},
+                                        r["url"],
+                                    ),
+                                )
                             )
-                        )
-                        for r in results
-                    ]
+                            for r in results
+                        ]
+                    )
+                    # 3) If not loading, no results, and query is non-empty, show "No results."
+                    if results
+                    else (
+                        html.p("No results.")
+                        if query and not results
+                        else None
+                    )
                 )
-                if results
-                else (html.p("No results.") if query and not results else None)
             ),
         ),
     )
