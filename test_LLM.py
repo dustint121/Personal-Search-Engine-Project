@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 1. Set your API key (or export PERPLEXITY_API_KEY in your shell)
-# API_KEY = "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"
 API_KEY = os.getenv("PERPLEXITY_API_KEY")
 
 # 2. Create client
