@@ -1,9 +1,10 @@
 # Intro
 
-Hi! I'm your first Markdown file in **StackEdit**. If you want to learn about StackEdit, you can read me. If you want to play with Markdown, you can edit me. Once you have finished with me, you can create new files by opening the **file explorer** on the left corner of the navigation bar.
+## About
 
+My project repo for creating a personal search engine based on my academic and study notes stored on OneDrive (.docx files). Perplexity API will also be integrated for AI-based document summarization.
 
-## Data Requirements to Access Word Documents from OneDrive
+## Instructions to Access Word Documents from OneDrive
 Have an account on https://portal.azure.com/
 
 On Azure, go to Microsoft Entra ID.
@@ -15,10 +16,28 @@ On Azure, go to Microsoft Entra ID.
 6. Go under new app --> Overview : Record the **"Application (client) ID"** for future reference in code
 
 
+
+## Instructions to Access Perplexity Chatbot API
+1. Have account on https://www.perplexity.ai/  
+2. Generate API Key for usage and record for future reference
+
+
+Official Documentation for API: https://docs.perplexity.ai/getting-started/overview
+
+
+
 ## In Project File after git cloning
 Add **.env** file with
-> CLIENT_ID= **[Client ID recorded in previous section]**
+> CLIENT_ID= **[Microsoft Azure Client ID]**
+> PERPLEXITY_API_KEY=**[Perplexity API key]**
 
 Run
 >pip install -r requirements.txt
 
+
+## Useful Documentation
+Official Documentation for Microsoft Graph API: 
+https://learn.microsoft.com/en-us/graph/overview 
+https://developer.microsoft.com/en-us/graph/graph-explorer
+
+Official Documentation for Perplexity API: https://docs.perplexity.ai/getting-started/overview

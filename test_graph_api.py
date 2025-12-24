@@ -53,7 +53,8 @@ if __name__ == "__main__":
         # if response.status_code == 200: # should give json response
         else: 
             #save json response to a file formatted with indentation
-            with open("test.json", "w") as f:
+            os.makedirs("output", exist_ok=True)
+            with open("output/graph_api.json", "w") as f:
                 json.dump(response.json(), f, indent=4)
     else:
         print("Error:", result.get("error_description"))
