@@ -2,5 +2,7 @@
 /.venv
 /output
 /test_files
+/test_code
+/__pycache__
 test.json
 token_cache.bin
