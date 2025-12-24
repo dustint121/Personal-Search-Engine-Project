@@ -6,10 +6,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("PERPLEXITY_API_KEY")
+perplexity_key = os.getenv("PERPLEXITY_API_KEY")
 
 client = Perplexity(
-    api_key=API_KEY,
+    api_key=perplexity_key,
     base_url="https://api.perplexity.ai",
 )
 
