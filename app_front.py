@@ -1,9 +1,9 @@
-# ui.py
+# app_frontend.py
 from reactpy import component, html, hooks
 from reactpy.backend.flask import configure
 import httpx
 
-from app_backend import app  # import the Flask app
+from app_backend import app
 from app_styles import (
     page_style,
     nav_container_style,
@@ -15,20 +15,19 @@ from app_styles import (
     result_url_style,
 )
 
-
 @component
-def SearchApp():
+def RootApp():
+    # "page1" = search page, "page2" = work-in-progress
     current_page, set_current_page = hooks.use_state("page1")
+
     query, set_query = hooks.use_state("")
     results, set_results = hooks.use_state([])
 
-    async def on_input(event):
-        q_value = event["target"]["value"]
-        set_query(q_value)
+    async def submit_search():
+        q_value = query.strip()
         if not q_value:
             set_results([])
             return
-
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 "http://127.0.0.1:5000/api/search",
@@ -36,24 +35,47 @@ def SearchApp():
             )
             set_results(resp.json())
 
+    async def on_input(event):
+        # Only update local query text
+        set_query(event["target"]["value"])
+
+    async def on_keydown(event):
+        # Trigger search only when Enter is pressed[web:112][web:122]
+        if event.get("key") == "Enter":
+            await submit_search()
+
     def switch_page(page_name: str):
         set_current_page(page_name)
 
-    # Page 1 content: search engine
+    # Page 1: search UI (no button)
     page1_content = html.div(
         {"style": box_style},
         html.h1(
             {"style": {"margin_bottom": "24px"}},
             "Personal OneDrive Search Engine",
         ),
-        html.input(
+        html.div(
             {
-                "type": "text",
-                "value": query,
-                "placeholder": "Search your OneDrive notes...",
-                "on_input": on_input,
-                "style": search_input_style,
-            }
+                "style": {
+                    "display": "flex",
+                    "justify_content": "center",
+                    "align_items": "center",
+                }
+            },
+            html.input(
+                {
+                    "type": "text",
+                    "value": query,
+                    "placeholder": "Search your OneDrive notes... (press Enter)",
+                    "on_input": on_input,
+                    "on_keydown": on_keydown,
+                    "style": {
+                        **search_input_style,
+                        # keep width behavior reasonable without a button
+                        "max_width": "600px",
+                    },
+                }
+            ),
         ),
         html.div(
             {"style": results_container_style},
@@ -79,12 +101,12 @@ def SearchApp():
                     ]
                 )
                 if results
-                else (html.p("No results.") if query else None)
+                else (html.p("No results.") if query and not results else None)
             ),
         ),
     )
 
-    # Page 2 content: Work in Progress
+    # Page 2: Work in Progress
     page2_content = html.div(
         {"style": box_style},
         html.h1({"style": {"margin_bottom": "16px"}}, "Work in Progress"),
@@ -115,12 +137,11 @@ def SearchApp():
                 "Page 2",
             ),
         ),
-        # Centered content
         main_content,
     )
 
-# Mount ReactPy UI onto the existing Flask app
-configure(app, SearchApp)
+# Mount ReactPy UI on the Flask app
+configure(app, RootApp)
 
 if __name__ == "__main__":
     app.run(debug=True)
