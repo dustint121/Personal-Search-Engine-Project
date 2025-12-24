@@ -29,6 +29,7 @@ Official Documentation for API: https://docs.perplexity.ai/getting-started/overv
 ## In Project File after git cloning
 Add **.env** file with
 > CLIENT_ID= **[Microsoft Azure Client ID]**
+
 > PERPLEXITY_API_KEY=**[Perplexity API key]**
 
 Run

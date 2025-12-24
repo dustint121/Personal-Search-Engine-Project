@@ -59,31 +59,15 @@ if __name__ == "__main__":
     access_token = get_token(app)
 
     headers = {"Authorization": f"Bearer {access_token}"}
- 
-
-    # Uncomment one of the following URLs to test different API endpoints
-    # url = "https://graph.microsoft.com/v1.0/me/drive/root/children"
-    #for Document folder: 9E566E567FCDC108
-    # url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108" # document folder id
-    # url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108/items?$filter=endswith(name,'.docx')"
-
-    # url = "https://graph.microsoft.com/v1.0/me/drive/root/search(q='Spark')?$filter=endswith(name,'.docx')&$select=name,id,webUrl"
 
 
-    # url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108/items/9E566E567FCDC108!6747"  # text file metadata with downloadable URL
-    # url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108/items/9E566E567FCDC108!6747/content"  # text file content
-    url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108/items/9E566E567FCDC108!6559" #docx file metadata
-    
+    query = input("Enter search query: ")
+
+    url = f"https://graph.microsoft.com/v1.0/me/drive/root/search(q='{query}')?$filter=endswith(name,'.docx')&$select=name,id,webUrl"
+
+
     response = requests.get(url, headers=headers)
-    # print("Response Status Code:", response.status_code)
 
     os.makedirs("output", exist_ok=True)
-    if response.status_code == 200 and "content" in url: #will return raw file content
-        # print("File Content:")
-        # print(response.text)
-        with open("output/graph_api_file_content.txt", "w", encoding="utf-8") as f:
-            f.write(response.text)
-    else:
-        with open("output/graph_api.json", "w") as f:
-            json.dump(response.json(), f, indent=4)
-
+    with open("output/query_result.json", "w") as f:
+        json.dump(response.json(), f, indent=4)
