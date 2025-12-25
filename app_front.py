@@ -1,3 +1,4 @@
+# app_front.py
 from reactpy import component, html, hooks
 from reactpy.backend.flask import configure
 import httpx
@@ -27,10 +28,18 @@ def RootApp():
     selected_ids, set_selected_ids = hooks.use_state(set())
     show_modal, set_show_modal = hooks.use_state(False)
 
+    # State for Perplexity summary in the modal
+    summary_loading, set_summary_loading = hooks.use_state(False)
+    summary_text, set_summary_text = hooks.use_state("")
+    summary_error, set_summary_error = hooks.use_state("")
+
     async def submit_search():
         q_value = query.strip()
-        # Clear previous selection and results on new search
+        # Clear previous selection and summary on new search
         set_selected_ids(set())
+        set_summary_text("")
+        set_summary_error("")
+
         if not q_value:
             set_results([])
             set_is_loading(False)
@@ -77,10 +86,7 @@ def RootApp():
         set_selected_ids(updater)
 
     def get_selected_docs():
-        return [
-            r for r in results
-            if get_doc_id(r) in selected_ids
-        ]
+        return [r for r in results if get_doc_id(r) in selected_ids]
 
     # Result count
     result_count_text = ""
@@ -157,7 +163,7 @@ def RootApp():
                                             "gap": "8px",
                                         }
                                     },
-                                    # Checkbox: checked must be a boolean[web:147][web:89]
+                                    # Checkbox
                                     html.input(
                                         {
                                             "type": "checkbox",
@@ -208,7 +214,7 @@ def RootApp():
 
     main_content = page1_content if current_page == "page1" else page2_content
 
-    # Bottom-right arrow button (Unicode arrow)
+    # Bottom-right arrow button (opens modal)
     arrow_button = html.button(
         {
             "style": {
@@ -230,7 +236,38 @@ def RootApp():
         "→",
     ) if current_page == "page1" else None
 
-    # Modal overlay listing selected documents
+    # Summarize button handler inside modal
+    async def on_summarize_click(event):
+        docs = get_selected_docs()
+        ids = [get_doc_id(d) for d in docs]
+        if not ids:
+            set_summary_error("No documents selected to summarize.")
+            return
+
+        set_summary_loading(True)
+        set_summary_error("")
+        set_summary_text("")
+        try:
+            # Increase timeout to e.g. 120 seconds to allow Graph + Perplexity work[web:178]
+            timeout = httpx.Timeout(120.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    "http://127.0.0.1:5000/api/summarize",
+                    json={"ids": ids},
+                )
+                data = resp.json()
+                if resp.status_code != 200 or "error" in data:
+                    set_summary_error(str(data.get("error", "Unknown error")))
+                else:
+                    set_summary_text(data.get("summary", ""))
+        except httpx.ReadTimeout:
+            set_summary_error("Summarization request timed out. Please try again or select fewer documents.")
+        except Exception as e:
+            set_summary_error(f"Unexpected error: {e}")
+        finally:
+            set_summary_loading(False)
+
+    # Modal overlay listing selected documents and summary
     selected_docs = get_selected_docs()
     modal = (
         html.div(
@@ -254,9 +291,9 @@ def RootApp():
                         "background_color": "#ffffff",
                         "padding": "20px",
                         "border_radius": "8px",
-                        "max_width": "500px",
+                        "max_width": "600px",
                         "width": "90%",
-                        "max_height": "70vh",
+                        "max_height": "80vh",
                         "overflow_y": "auto",
                         "box_shadow": "0 2px 8px rgba(0,0,0,0.3)",
                     }
@@ -285,6 +322,7 @@ def RootApp():
                         "X",
                     ),
                 ),
+                # List of selected doc titles
                 (
                     html.ul(
                         [
@@ -294,6 +332,51 @@ def RootApp():
                     )
                     if selected_docs
                     else html.p("No documents selected.")
+                ),
+                # Summarize button
+                html.div(
+                    {
+                        "style": {
+                            "margin_top": "16px",
+                            "display": "flex",
+                            "justify_content": "flex-end",
+                        }
+                    },
+                    html.button(
+                        {
+                            "on_click": on_summarize_click,
+                            "style": {
+                                "padding": "8px 14px",
+                                "border_radius": "4px",
+                                "border": "none",
+                                "background_color": "#1a73e8",
+                                "color": "white",
+                                "cursor": "pointer",
+                                "font_size": "14px",
+                            },
+                            "disabled": summary_loading,
+                        },
+                        "Summarize",
+                    ),
+                ),
+                # Summary status / result
+                html.div(
+                    {
+                        "style": {
+                            "margin_top": "16px",
+                            "font_size": "14px",
+                            "white_space": "pre-wrap",
+                        }
+                    },
+                    (
+                        "Summarizing selected documents..."
+                        if summary_loading
+                        else (
+                            summary_error
+                            if summary_error
+                            else summary_text
+                        )
+                    ),
                 ),
             ),
         )
