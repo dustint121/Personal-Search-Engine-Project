@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+ONEDRIVE_DOCUMENTS_FOLDER_ID = os.getenv("ONEDRIVE_DOCUMENTS_FOLDER_ID")
+
 CLIENT_ID = os.getenv("CLIENT_ID")
 AUTHORITY = "https://login.microsoftonline.com/common"
 SCOPES = ["Files.Read.All"]
@@ -74,6 +76,8 @@ if __name__ == "__main__":
     # url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108/items/9E566E567FCDC108!6747/content"  # text file content
     url = "https://graph.microsoft.com/v1.0/drives/9E566E567FCDC108/items/9E566E567FCDC108!6559" #docx file metadata
     
+
+    url = f"https://graph.microsoft.com/v1.0/drives/{ONEDRIVE_DOCUMENTS_FOLDER_ID}/items/9E566E567FCDC108!6559"
     response = requests.get(url, headers=headers)
     # print("Response Status Code:", response.status_code)
 
