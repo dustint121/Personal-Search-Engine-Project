@@ -1,4 +1,3 @@
-# app_frontend.py
 from reactpy import component, html, hooks
 from reactpy.backend.flask import configure
 import httpx
@@ -24,8 +23,14 @@ def RootApp():
     results, set_results = hooks.use_state([])
     is_loading, set_is_loading = hooks.use_state(False)
 
+    # Track selected document IDs (strings)
+    selected_ids, set_selected_ids = hooks.use_state(set())
+    show_modal, set_show_modal = hooks.use_state(False)
+
     async def submit_search():
         q_value = query.strip()
+        # Clear previous selection and results on new search
+        set_selected_ids(set())
         if not q_value:
             set_results([])
             set_is_loading(False)
@@ -39,7 +44,6 @@ def RootApp():
                     params={"q": q_value},
                 )
                 data = resp.json()
-                # If backend returns an error object, handle minimally
                 if isinstance(data, dict) and "error" in data:
                     set_results([])
                 else:
@@ -48,22 +52,52 @@ def RootApp():
             set_is_loading(False)
 
     async def on_input(event):
-        # Only update local query text
         set_query(event["target"]["value"])
 
     async def on_keydown(event):
-        # Trigger search only when Enter is pressed[web:127]
         if event.get("key") == "Enter":
             await submit_search()
 
     def switch_page(page_name: str):
         set_current_page(page_name)
+        set_show_modal(False)
+
+    def get_doc_id(doc: dict) -> str:
+        # Prefer Graph "id", else fallback to URL, then title
+        return str(doc.get("id") or doc.get("url") or doc.get("title"))
+
+    def toggle_selected(doc_id: str):
+        def updater(prev_ids):
+            new_ids = set(prev_ids)
+            if doc_id in new_ids:
+                new_ids.remove(doc_id)
+            else:
+                new_ids.add(doc_id)
+            return new_ids
+        set_selected_ids(updater)
+
+    def get_selected_docs():
+        return [
+            r for r in results
+            if get_doc_id(r) in selected_ids
+        ]
+
+    # Result count
+    result_count_text = ""
+    if not is_loading and query:
+        count = len(results)
+        if count == 0:
+            result_count_text = "0 results found"
+        elif count == 1:
+            result_count_text = "1 result found"
+        else:
+            result_count_text = f"{count} results found"
 
     # Page 1: search UI
     page1_content = html.div(
         {"style": box_style},
         html.h1(
-            {"style": {"margin_bottom": "24px"}},
+            {"style": {"margin_bottom": "16px"}},
             "Personal OneDrive Search Engine",
         ),
         html.div(
@@ -89,34 +123,69 @@ def RootApp():
             ),
         ),
         html.div(
+            {
+                "style": {
+                    "margin_top": "8px",
+                    "font_size": "13px",
+                    "color": "#5f6368",
+                }
+            },
+            result_count_text,
+        )
+        if result_count_text
+        else None,
+        html.div(
             {"style": results_container_style},
             (
-                # 1) Show "Processing query..." while waiting
                 html.p("Processing query...")
                 if is_loading
-                # 2) Once loaded, show results (if any)
                 else (
                     html.ul(
                         [
                             html.li(
-                                html.div(
-                                    html.a(
+                                {
+                                    "style": {
+                                        "list_style_type": "none",
+                                        "margin_bottom": "8px",
+                                    }
+                                },
+                                html.label(
+                                    {
+                                        "style": {
+                                            "display": "flex",
+                                            "align_items": "flex-start",
+                                            "gap": "8px",
+                                        }
+                                    },
+                                    # Checkbox: checked must be a boolean[web:147][web:89]
+                                    html.input(
                                         {
-                                            "href": r["url"],
-                                            "style": result_title_style,
-                                        },
-                                        r["title"],
+                                            "type": "checkbox",
+                                            "checked": get_doc_id(r) in selected_ids,
+                                            "on_change": (
+                                                lambda event, doc_id=get_doc_id(r):
+                                                toggle_selected(doc_id)
+                                            ),
+                                        }
                                     ),
                                     html.div(
-                                        {"style": result_url_style},
-                                        r["url"],
+                                        html.a(
+                                            {
+                                                "href": r["url"],
+                                                "style": result_title_style,
+                                            },
+                                            r["title"],
+                                        ),
+                                        html.div(
+                                            {"style": result_url_style},
+                                            r["url"],
+                                        ),
                                     ),
-                                )
+                                ),
                             )
                             for r in results
                         ]
                     )
-                    # 3) If not loading, no results, and query is non-empty, show "No results."
                     if results
                     else (
                         html.p("No results.")
@@ -139,9 +208,101 @@ def RootApp():
 
     main_content = page1_content if current_page == "page1" else page2_content
 
+    # Bottom-right arrow button (Unicode arrow)
+    arrow_button = html.button(
+        {
+            "style": {
+                "position": "fixed",
+                "right": "24px",
+                "bottom": "24px",
+                "width": "52px",
+                "height": "52px",
+                "border_radius": "26px",
+                "border": "none",
+                "background_color": "#1a73e8",
+                "color": "white",
+                "font_size": "24px",
+                "cursor": "pointer",
+                "box_shadow": "0 2px 6px rgba(0,0,0,0.3)",
+            },
+            "on_click": lambda event: set_show_modal(True),
+        },
+        "→",
+    ) if current_page == "page1" else None
+
+    # Modal overlay listing selected documents
+    selected_docs = get_selected_docs()
+    modal = (
+        html.div(
+            {
+                "style": {
+                    "position": "fixed",
+                    "top": "0",
+                    "left": "0",
+                    "width": "100vw",
+                    "height": "100vh",
+                    "background_color": "rgba(0,0,0,0.4)",
+                    "display": "flex",
+                    "justify_content": "center",
+                    "align_items": "center",
+                    "z_index": "1000",
+                }
+            },
+            html.div(
+                {
+                    "style": {
+                        "background_color": "#ffffff",
+                        "padding": "20px",
+                        "border_radius": "8px",
+                        "max_width": "500px",
+                        "width": "90%",
+                        "max_height": "70vh",
+                        "overflow_y": "auto",
+                        "box_shadow": "0 2px 8px rgba(0,0,0,0.3)",
+                    }
+                },
+                html.div(
+                    {
+                        "style": {
+                            "display": "flex",
+                            "justify_content": "space_between",
+                            "align_items": "center",
+                            "margin_bottom": "12px",
+                        }
+                    },
+                    html.h3("Selected Documents"),
+                    html.button(
+                        {
+                            "on_click": lambda event: set_show_modal(False),
+                            "style": {
+                                "margin_left": "auto",
+                                "border": "none",
+                                "background": "none",
+                                "font_size": "18px",
+                                "cursor": "pointer",
+                            },
+                        },
+                        "X",
+                    ),
+                ),
+                (
+                    html.ul(
+                        [
+                            html.li(doc.get("title", "(no name)"))
+                            for doc in selected_docs
+                        ]
+                    )
+                    if selected_docs
+                    else html.p("No documents selected.")
+                ),
+            ),
+        )
+        if show_modal and current_page == "page1"
+        else None
+    )
+
     return html.div(
         {"style": page_style},
-        # Top-left page switcher
         html.div(
             {"style": nav_container_style},
             html.div(
@@ -160,9 +321,10 @@ def RootApp():
             ),
         ),
         main_content,
+        arrow_button,
+        modal,
     )
 
-# Mount ReactPy UI on the Flask app
 configure(app, RootApp)
 
 if __name__ == "__main__":
