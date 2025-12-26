@@ -3,6 +3,7 @@
 /output
 /test_files
 /test_code
+/note_files
 /__pycache__
 test.json
 token_cache.bin

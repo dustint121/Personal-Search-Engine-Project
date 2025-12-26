@@ -24,7 +24,8 @@ if __name__ == "__main__":
     encoded_file = None
 
     # FILE_PATH = "C:\\Users\\dusti\\Downloads\\Notes Search Engine Project\\test_files\\A for-loop is all you need. For solving the inverse problem.pdf" # change to your file
-    FILE_PATH = "C:\\Users\\dusti\\Downloads\\Notes Search Engine Project\\test_files\\Dustin_Tran_Resume.docx"
+    # FILE_PATH = "C:\\Users\\dusti\\Downloads\\Notes Search Engine Project\\test_files\\Dustin_Tran_Resume.docx"
+    FILE_PATH = "note_files\9E566E567FCDC108!9755"
     with open(FILE_PATH, "rb") as f:
         file_data = f.read()
         encoded_file = base64.b64encode(file_data).decode('utf-8')
@@ -57,15 +58,15 @@ if __name__ == "__main__":
                     }
                 ]
 
-    file_url = "https://www.gutenberg.org/cache/epub/77539/pg77539-images.html"
+    # file_url = "https://www.gutenberg.org/cache/epub/77539/pg77539-images.html"
 
-    content.append(
-        {   "type": "file_url",
-            "file_url": {
-                "url": file_url
-            }
-        }
-    )
+    # content.append(
+    #     {   "type": "file_url",
+    #         "file_url": {
+    #             "url": file_url
+    #         }
+    #     }
+    # )
 
     response = client.chat.completions.create(
         model="sonar",
