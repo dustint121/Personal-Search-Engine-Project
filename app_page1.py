@@ -26,6 +26,7 @@ TAG_LABELS = [
 
 @component
 def Page1():
+    auth_message, set_auth_message = hooks.use_state("")
     query, set_query = hooks.use_state("")
     results, set_results = hooks.use_state([])
     is_loading, set_is_loading = hooks.use_state(False)
@@ -42,6 +43,20 @@ def Page1():
 
     # Tags currently visible (static labels but removable)
     tags, set_tags = hooks.use_state(TAG_LABELS)
+
+    @hooks.use_effect
+    async def check_auth_status():
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get("http://127.0.0.1:5000/api/auth-status")
+                data = resp.json()
+                msg = data.get("message", "")
+                if msg:
+                    set_auth_message(msg)
+        except Exception as e:
+            set_auth_message(f"Authentication status check failed: {e}")
+        return  # no cleanup
+
 
     async def submit_search(q_value: str | None = None):
         if q_value is None:
@@ -182,8 +197,19 @@ def Page1():
     page1_content = html.div(
         {"style": box_style},
         html.h1(
-            {"style": {"margin_bottom": "16px"}},
+            {"style": {"margin_bottom": "8px"}},
             "Personal OneDrive Search Engine",
+        ),
+        html.div(
+            {
+                "style": {
+                    "margin_bottom": "12px",
+                    "font_size": "13px",
+                    "color": "#5f6368",
+                    "white_space": "pre-wrap",
+                }
+            },
+            auth_message,
         ),
         html.div(
             {

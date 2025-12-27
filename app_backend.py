@@ -10,6 +10,7 @@ from flask import Flask, jsonify, request
 from msal import PublicClientApplication, SerializableTokenCache
 from dotenv import load_dotenv
 from perplexity import Perplexity
+from get_authentication import load_cache, get_token  
 
 load_dotenv()
 
@@ -43,35 +44,6 @@ CHAT_HISTORY = [
 ]
 
 
-def load_cache():
-    cache = SerializableTokenCache()
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
-            cache.deserialize(f.read())
-    atexit.register(
-        lambda: open(CACHE_FILE, "w").write(cache.serialize())
-        if cache.has_state_changed
-        else None
-    )
-    return cache
-
-
-def get_token(msal_app: PublicClientApplication) -> str:
-    accounts = msal_app.get_accounts()
-    if accounts:
-        result = msal_app.acquire_token_silent(SCOPES, account=accounts[0])
-        if result and "access_token" in result:
-            return result["access_token"]
-
-    flow = msal_app.initiate_device_flow(scopes=SCOPES)
-    if "user_code" not in flow:
-        raise RuntimeError("Failed to create device flow. Check app registration.")
-    print("Go to", flow["verification_uri"], "and enter code:", flow["user_code"])
-    result = msal_app.acquire_token_by_device_flow(flow)
-    if "access_token" in result:
-        return result["access_token"]
-
-    raise RuntimeError("Authentication failed: {}".format(result.get("error_description")))
 
 
 def get_graph_headers():
@@ -253,3 +225,52 @@ def api_chat():
     citations = getattr(response, "citations", []) or []
 
     return jsonify({"reply": reply, "citations": citations})
+
+
+@app.route("/api/auth-status")
+def api_auth_status():
+    """
+    Check if a valid Graph token is available.
+    If not, start device flow and return the 'Go to ... enter code ...' message.
+    """
+    try:
+        cache = load_cache()
+        msal_app = PublicClientApplication(
+            client_id=CLIENT_ID,
+            authority=AUTHORITY,
+            token_cache=cache,
+        )
+
+        # Try silent first
+        accounts = msal_app.get_accounts()
+        if accounts:
+            result = msal_app.acquire_token_silent(SCOPES, account=accounts[0])
+            if result and "access_token" in result:
+                return jsonify(
+                    {
+                        "status": "ok",
+                        "message": "Microsoft Graph permissions are properly set.",
+                    }
+                )
+
+        # No valid token: initiate device flow but DO NOT block waiting for user.
+        flow = msal_app.initiate_device_flow(scopes=SCOPES)
+        if "user_code" not in flow:
+            return jsonify(
+                {
+                    "status": "error",
+                    "message": "Failed to create device flow. Check app registration.",
+                }
+            ), 500
+
+        # Save pending flow info in cache file (optional; you can skip if not needed)
+        # Show same text the console version printed
+        verify_msg = (
+            f"Go to {flow['verification_uri']} and enter code: {flow['user_code']}\nThen refresh this page."
+        )
+
+        # Note: you will still need to run get_authentication.py once and finish device
+        # flow in a terminal, but now the instructions are visible in the web UI.
+        return jsonify({"status": "needs_auth", "message": verify_msg})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
