@@ -56,12 +56,12 @@ def Page2():
     async def on_input(event):
         set_input_text(event["target"]["value"])
 
-    async def on_keydown(event):
-        # ReactPy keyboard events use 'shift_key' not 'shiftKey'
+    def on_keydown(event):
+        # Send on Enter (without Shift) and don't insert newline
         if event.get("key") == "Enter" and not event.get("shift_key"):
-            # prevent newline and send the message
-            await send_message(event)
-            
+            event["prevent_default"] = True  # optional, avoids newline
+            send_message()
+
     def open_citations(cites):
         set_current_citations(cites or [])
         set_show_citations(True)
@@ -72,11 +72,12 @@ def Page2():
         if not text or is_sending:
             return
 
+        # Clear input immediately so UI updates regardless of API timing
+        set_input_text("")
+
         # append user message locally
         new_messages = messages + [{"sender": "user", "text": text, "citations": []}]
         set_messages(new_messages)
-        # clear input immediately
-        set_input_text("")
         set_error_text("")
         set_is_sending(True)
 
@@ -99,17 +100,11 @@ def Page2():
         finally:
             set_is_sending(False)
 
-        # append assistant reply with citations
         set_messages(
             new_messages
-            + [
-                {
-                    "sender": "ai",
-                    "text": reply,
-                    "citations": citations,
-                }
-            ]
+            + [{"sender": "ai", "text": reply, "citations": citations}]
         )
+
 
     # Citations modal
     citations_modal = (

@@ -67,6 +67,11 @@ if __name__ == "__main__":
     response = requests.get(url, headers=headers)
 
     list_of_notes = response.json()['value']
+
+    #write list of notes to json file
+    with open("notes_metadata.json", "w") as f:
+        json.dump(list_of_notes, f)
+
     print(f"Found {len(list_of_notes)} notes.")
     count = 0
     os.makedirs("note_files", exist_ok=True)
