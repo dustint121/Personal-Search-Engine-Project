@@ -125,17 +125,21 @@ def search_onedrive_docx(query: str):
 def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
     """
     Get raw bytes for a document either from local disk or from Graph.
-    source: "local" or "cloud"
+    If source == "local" and the local file doesn't exist, download it
+    from Graph into note_files/ before returning its content.[file:196]
     """
-    if source == "local":
-        # Local binary files saved by download_all_notes.py as note_files/<id>
-        local_path = os.path.join(NOTE_FILES_DIR, item_id)
-        if not os.path.exists(local_path):
-            raise RuntimeError(f"Local file not found for id {item_id}: {local_path}")
-        with open(local_path, "rb") as f:
-            return f.read()
+    # Local path where download_all_notes.py stores files
+    local_path = os.path.join(NOTE_FILES_DIR, item_id)
 
-    # Default: cloud / Graph API
+    if source == "local":
+        # If already downloaded, just read it.
+        if os.path.exists(local_path):
+            with open(local_path, "rb") as f:
+                return f.read()
+        # Otherwise, fall through to a one-off download from Graph
+        # and save it locally before returning.
+
+    # Use Graph API to fetch the file (for both "cloud" and "local" when missing)
     headers = get_graph_headers()
     url = (
         f"https://graph.microsoft.com/v1.0/drives/"
@@ -147,8 +151,16 @@ def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
             f"Failed to retrieve document content from {url}: "
             f"{response.status_code} {response.text}"
         )
-    return response.content
 
+    content_bytes = response.content
+
+    # If the user requested local mode, cache the file into note_files/<id>[file:196]
+    if source == "local":
+        os.makedirs(NOTE_FILES_DIR, exist_ok=True)
+        with open(local_path, "wb") as f:
+            f.write(content_bytes)
+
+    return content_bytes
 
 # === Flask API routes ===
 
