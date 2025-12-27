@@ -6,3 +6,4 @@
 /__pycache__
 test.json
 token_cache.bin
+notes_metadata.json
