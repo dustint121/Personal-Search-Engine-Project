@@ -31,6 +31,19 @@ PPLX_CLIENT = Perplexity(
 # Local notes directory used by download_all_notes.py
 NOTE_FILES_DIR = os.path.join(os.path.dirname(__file__), "note_files")
 
+# Simple in-memory chat history per session (single-user / dev only)
+CHAT_HISTORY = [
+    {
+        "role": "system",
+        "content": (
+            "You are a friendly chatbot in a web app. "
+            "Keep replies brief and to-the-point unless the user asks for detail. "
+            "You should not be referencing or citing any external sources (i.e. websites)."
+        ),
+    }
+]
+
+
 
 def load_cache():
     cache = SerializableTokenCache()
@@ -224,4 +237,44 @@ def api_summarize():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """
+    Body: { "message": "user text" }
+    Returns: { "reply": "assistant text" }
+    Uses a single shared in-memory history (for dev).
+    """
+    data = request.get_json(silent=True) or {}
+    user_text = (data.get("message") or "").strip()
+    if not user_text:
+        return jsonify({"error": "Empty message"}), 400
+
+    # 1. Append user message to history
+    CHAT_HISTORY.append({"role": "user", "content": user_text})
+
+    try:
+        # 2. Call Perplexity chat completions (same as test_chatbot.py)[file:229]
+        response = PPLX_CLIENT.chat.completions.create(
+            model="sonar",
+            messages=CHAT_HISTORY,
+        )
+    except Exception as e:
+        # Remove last user message on failure
+        CHAT_HISTORY.pop()
+        return jsonify({"error": str(e)}), 500
+
+    # 3. Extract assistant reply and citations and store it in history
+    reply = response.choices[0].message.content
+    citations = getattr(response, "citations", None)
+    if citations is None:
+        # some clients expose it on response.citations, others under dict-style key
+        citations = getattr(response, "citations", []) or getattr(
+            getattr(response, "__dict__", {}), "get", lambda *_: []
+        )("citations", [])
+
+    CHAT_HISTORY.append({"role": "assistant", "content": reply})
+
+    return jsonify({"reply": reply, "citations": citations})
 # NOTE: do not put app.run(...) here; app_front.py calls it.
