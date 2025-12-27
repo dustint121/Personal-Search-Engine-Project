@@ -15,6 +15,19 @@ from app_styles import (
     result_url_style,
 )
 
+TAG_LABELS = [
+    "AWS",
+    "Azure",
+    "Spark",
+    "neural networks",
+    "machine learning",
+    "deep learning",
+    "Github",
+    "SQL",
+    "Databricks",
+]
+
+
 @component
 def RootApp():
     # "page1" = search page, "page2" = work-in-progress
@@ -33,27 +46,38 @@ def RootApp():
     summary_text, set_summary_text = hooks.use_state("")
     summary_error, set_summary_error = hooks.use_state("")
 
-    # New: whether to use local files vs Graph
+    # Whether to use local files vs Graph in summarization
     use_local_source, set_use_local_source = hooks.use_state(False)
 
-    async def submit_search():
-        q_value = query.strip()
+    # Tags currently visible (static labels but removable)
+    tags, set_tags = hooks.use_state(TAG_LABELS)
+
+    async def submit_search(q_value: str | None = None):
+        # If q_value is provided (e.g., from a tag), use that; else use current query state.
+        if q_value is None:
+            q = query.strip()
+        else:
+            q = q_value.strip()
+
         # Clear previous selection and summary on new search
         set_selected_ids(set())
         set_summary_text("")
         set_summary_error("")
 
-        if not q_value:
+        if not q:
             set_results([])
             set_is_loading(False)
             return
+
+        # Keep query box synced with what is being searched
+        set_query(q)
 
         set_is_loading(True)
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     "http://127.0.0.1:5000/api/search",
-                    params={"q": q_value},
+                    params={"q": q},
                 )
                 data = resp.json()
                 if isinstance(data, dict) and "error" in data:
@@ -91,6 +115,19 @@ def RootApp():
     def get_selected_docs():
         return [r for r in results if get_doc_id(r) in selected_ids]
 
+    # Tag interactions
+    def on_tag_remove(label: str):
+        def updater(prev_tags):
+            return [t for t in prev_tags if t != label]
+        set_tags(updater)
+
+    def on_tag_click_sync(label: str):
+        # synchronous handler that calls async submit_search via event handler mechanism
+        # 1) update the input box
+        set_query(label)
+        # 2) start search for this label
+        return submit_search(label)
+
     # Result count
     result_count_text = ""
     if not is_loading and query:
@@ -102,7 +139,66 @@ def RootApp():
         else:
             result_count_text = f"{count} results found"
 
-    # Page 1: search UI
+    # Tag bar: only show when there is no query and no results yet
+    tag_bar = (
+        html.div(
+            {
+                "style": {
+                    "margin_top": "16px",
+                    "display": "flex",
+                    "flex_wrap": "wrap",
+                    "gap": "8px",
+                    "justify_content": "center",
+                }
+            },
+            [
+                html.div(
+                    {
+                        "style": {
+                            "display": "inline-flex",
+                            "align_items": "center",
+                            "padding": "6px 10px",
+                            "border_radius": "999px",
+                            "border": "1px solid #dadce0",
+                            "background_color": "#ffffff",
+                            "cursor": "pointer",
+                            "font_size": "13px",
+                            "color": "#202124",
+                        }
+                    },
+                    # Clicking label fills input AND runs search
+                    html.span(
+                        {
+                            "on_click": (
+                                lambda event, lbl=label: on_tag_click_sync(lbl)
+                            ),
+                            "style": {"margin_right": "6px"},
+                        },
+                        label,
+                    ),
+                    # X for removing the tag from this view
+                    html.span(
+                        {
+                            "on_click": (
+                                lambda event, lbl=label: on_tag_remove(lbl)
+                            ),
+                            "style": {
+                                "font_weight": "bold",
+                                "cursor": "pointer",
+                                "color": "#5f6368",
+                            },
+                        },
+                        "×",
+                    ),
+                )
+                for label in tags
+            ],
+        )
+        if current_page == "page1" and not query and not results and not is_loading and tags
+        else None
+    )
+
+    # Page 1: search UI + optional tags + results
     page1_content = html.div(
         {"style": box_style},
         html.h1(
@@ -143,6 +239,8 @@ def RootApp():
         )
         if result_count_text
         else None,
+        # Tag bar only when nothing searched yet
+        tag_bar,
         html.div(
             {"style": results_container_style},
             (
@@ -334,7 +432,6 @@ def RootApp():
                         "X",
                     ),
                 ),
-                # List of selected doc titles
                 (
                     html.ul(
                         [
@@ -415,15 +512,12 @@ def RootApp():
                         }
                     },
                     (
-                        # Your requested message before summarization
-                        (
-                            f"{source_label} Summarizing selected documents..."
-                            if summary_loading
-                            else (
-                                summary_error
-                                if summary_error
-                                else summary_text
-                            )
+                        f"{source_label} Summarizing selected documents..."
+                        if summary_loading
+                        else (
+                            summary_error
+                            if summary_error
+                            else summary_text
                         )
                     ),
                 ),
@@ -456,6 +550,7 @@ def RootApp():
         arrow_button,
         modal,
     )
+
 
 configure(app, RootApp)
 
