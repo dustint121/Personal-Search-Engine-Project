@@ -1,22 +1,22 @@
 # app_backend.py
-
 import os
 import json
-import atexit
 import base64
 
 import requests
-from flask import Flask, jsonify, request
-from msal import PublicClientApplication, SerializableTokenCache
+from flask import Flask, jsonify, request, render_template
+
+from msal import PublicClientApplication
 from dotenv import load_dotenv
 from perplexity import Perplexity
-from get_authentication import load_cache, get_token  
+from get_authentication import load_cache, get_token
 
 load_dotenv()
 
 app = Flask(__name__)
 
 # === OneDrive / Microsoft Graph configuration ===
+
 CLIENT_ID = os.getenv("CLIENT_ID")
 AUTHORITY = "https://login.microsoftonline.com/common"
 SCOPES = ["Files.Read.All"]
@@ -24,29 +24,18 @@ CACHE_FILE = os.path.join(os.path.dirname(__file__), "token_cache.bin")
 ONEDRIVE_DOCUMENTS_FOLDER_ID = os.getenv("ONEDRIVE_DOCUMENTS_FOLDER_ID")
 
 # === Perplexity API configuration ===
+
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 PPLX_CLIENT = Perplexity(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai")
 
 # Notes metadata (catalog only – no local note_files usage)
+
 BASE_DIR = os.path.dirname(__file__)
 NOTES_METADATA_PATH = os.path.join(BASE_DIR, "notes_metadata.json")
 
-# Simple in-memory chat history (single-user dev)
-CHAT_HISTORY = [
-    {
-        "role": "system",
-        "content": (
-            "You are a friendly chatbot in a web app. "
-            "Keep replies brief and to-the-point unless the user asks for detail. "
-            "You can reference attached note files as needed."
-        ),
-    }
-]
-
-
-
 
 def get_graph_headers():
+    """Acquire a Graph access token and return Authorization headers."""
     cache = load_cache()
     msal_app = PublicClientApplication(
         client_id=CLIENT_ID,
@@ -58,9 +47,9 @@ def get_graph_headers():
 
 
 def search_onedrive_docx(query: str):
+    """Search OneDrive for .docx files whose name matches the query."""
     if not query:
         return []
-
     headers = get_graph_headers()
     url = (
         "https://graph.microsoft.com/v1.0/me/drive/root/"
@@ -112,8 +101,7 @@ def append_note_metadata_if_missing(note_id: str, name: str = "", web_url: str =
 
 def retrieve_document_content(item_id: str) -> bytes:
     """
-    Retrieve a document's bytes directly from Graph.
-    No local note_files folder is used.
+    Retrieve a document's bytes directly from Graph (no local note_files folder).
     """
     headers = get_graph_headers()
     url = (
@@ -129,8 +117,21 @@ def retrieve_document_content(item_id: str) -> bytes:
     return response.content
 
 
-# === API routes ===
+# === HTML pages (Flask + Jinja) ===
 
+@app.route("/")
+def page1():
+    """Search / summarize page."""
+    return render_template("page1.html")
+
+
+@app.route("/chat")
+def page2():
+    """Chat page."""
+    return render_template("page2.html")
+
+
+# === JSON API routes (used by JS) ===
 
 @app.route("/api/search")
 def api_search():
@@ -150,7 +151,8 @@ def api_notes_metadata():
 def api_summarize():
     payload = request.get_json(silent=True) or {}
     ids = payload.get("ids", [])
-    # source value from frontend is now ignored; always use Graph
+    # "source" from frontend is ignored; always use Graph
+
     if not ids:
         return jsonify({"error": "No ids provided"}), 400
 
@@ -165,6 +167,7 @@ def api_summarize():
             "You are summarizing a set of Microsoft Word documents from my notes. "
             "For each attached document, provide a short summary, then a brief overall summary."
         )
+
         content = [{"type": "text", "text": prompt}]
         for encoded_data in file_contents:
             content.append(
@@ -178,6 +181,7 @@ def api_summarize():
             model="sonar",
             messages=[{"role": "user", "content": content}],
         )
+
         summary_text = response.choices[0].message.content
         return jsonify({"summary": summary_text, "source": "cloud"})
     except Exception as e:
@@ -223,7 +227,6 @@ def api_chat():
 
     reply = response.choices[0].message.content
     citations = getattr(response, "citations", []) or []
-
     return jsonify({"reply": reply, "citations": citations})
 
 
@@ -263,14 +266,15 @@ def api_auth_status():
                 }
             ), 500
 
-        # Save pending flow info in cache file (optional; you can skip if not needed)
-        # Show same text the console version printed
         verify_msg = (
-            f"Go to {flow['verification_uri']} and enter code: {flow['user_code']}\nThen refresh this page."
+            f"Go to {flow['verification_uri']} and enter code: {flow['user_code']}\n"
+            "Then refresh this page."
         )
 
-        # Note: you will still need to run get_authentication.py once and finish device
-        # flow in a terminal, but now the instructions are visible in the web UI.
         return jsonify({"status": "needs_auth", "message": verify_msg})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(debug=True)

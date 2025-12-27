@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .chat-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .chat-messages {
+    max-height: 480px;
+    overflow-y: auto;
+    padding: 12px 8px;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+  }
+  .chat-row {
+    display: flex;
+    margin-bottom: 12px;
+  }
+  .chat-row.user {
+    justify-content: flex-end;
+  }
+  .chat-row.ai {
+    justify-content: flex-start;
+  }
+  .bubble-user {
+    display: inline-block;
+    max-width: 70%;
+    padding: 8px 12px;
+    border-radius: 16px;
+    border-top-right-radius: 4px;
+    background-color: #2563eb;
+    color: #ffffff;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .bubble-ai {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+    background-color: #ffffff;
+    color: #111827;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+    position: relative;
+  }
+  .bubble-footer {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #6b7280;
+    display: flex;
+    gap: 8px;
+  }
+  .bubble-footer button {
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    color: #2563eb;
+    font-size: 12px;
+  }
+  .chat-input-area {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .chat-textarea {
+    width: 100%;
+    min-height: 80px;
+    max-height: 200px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    font-size: 14px;
+    resize: vertical;
+  }
+  .chat-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .chat-btn {
+    padding: 8px 14px;
+    border-radius: 4px;
+    border: none;
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .attach-btn {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid #d1d5db;
+    background-color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .error-text {
+    font-size: 13px;
+    color: #b91c1c;
+  }
+  .attachments-banner {
+    font-size: 13px;
+    color: #374151;
+  }
+  .attachments-banner span {
+    font-weight: 500;
+  }
+  /* Attachments modal */
+  .attachments-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0,0.4);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  .attachments-backdrop.show {
+    display: flex;
+  }
+  .attachments-box {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .attachments-list {
+    margin-top: 12px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .attachments-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  /* Citations modal */
+  .citations-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0,0.4);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1100;
+  }
+  .citations-backdrop.show {
+    display: flex;
+  }
+  .citations-box {
+    background-color: #ffffff;
+    padding: 16px;
+    border-radius: 8px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="box">
+  <h1 style="margin-bottom: 12px;">Notes Chatbot</h1>
+
+  <div class="chat-container">
+    <div id="chat-messages" class="chat-messages"></div>
+
+    <div id="attachments-banner" class="attachments-banner"></div>
+
+    <div class="chat-input-area">
+      <textarea id="chat-input" class="chat-textarea"
+                placeholder="Ask anything about your documents or ideas. (Enter = send, Shift+Enter = newline)"></textarea>
+      <div class="chat-actions">
+        <button id="open-attachments" class="attach-btn">
+          Attach notes
+        </button>
+        <button id="send-message" class="chat-btn">
+          Send
+        </button>
+      </div>
+      <div id="chat-error" class="error-text"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Attachments modal -->
+<div id="attachments-modal" class="attachments-backdrop">
+  <div class="attachments-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>Select notes to attach</h3>
+      <button id="close-attachments" class="modal-close">×</button>
+    </div>
+    <div class="attachments-list" id="attachments-list"></div>
+  </div>
+</div>
+
+<!-- Citations modal -->
+<div id="citations-modal" class="citations-backdrop">
+  <div class="citations-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3>Citations</h3>
+      <button id="close-citations" class="modal-close">×</button>
+    </div>
+    <div id="citations-content" style="font-size:13px;white-space:pre-wrap;"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const chatMessagesEl = document.getElementById("chat-messages");
+  const chatInputEl = document.getElementById("chat-input");
+  const sendMessageBtn = document.getElementById("send-message");
+  const chatErrorEl = document.getElementById("chat-error");
+  const attachmentsBannerEl = document.getElementById("attachments-banner");
+
+  const attachmentsModalEl = document.getElementById("attachments-modal");
+  const attachmentsListEl = document.getElementById("attachments-list");
+  const openAttachmentsBtn = document.getElementById("open-attachments");
+  const closeAttachmentsBtn = document.getElementById("close-attachments");
+
+  const citationsModalEl = document.getElementById("citations-modal");
+  const citationsContentEl = document.getElementById("citations-content");
+  const closeCitationsBtn = document.getElementById("close-citations");
+
+  let messages = [
+    {
+      sender: "ai",
+      text: "Hi, I’m your notes chatbot. Ask me anything about your documents or ideas.",
+      citations: [],
+      note_ids: [],
+    }
+  ];
+  let isSending = false;
+  let allNotes = [];
+  let attachedNotes = []; // list of {id, name}
+
+  function renderMessages() {
+    chatMessagesEl.innerHTML = "";
+    messages.forEach((msg, index) => {
+      const row = document.createElement("div");
+      row.className = "chat-row " + (msg.sender === "user" ? "user" : "ai");
+
+      const bubble = document.createElement("div");
+      bubble.className = msg.sender === "user" ? "bubble-user" : "bubble-ai";
+      bubble.textContent = msg.text;
+
+      if (msg.sender === "ai") {
+        const footer = document.createElement("div");
+        footer.className = "bubble-footer";
+
+        if (msg.citations && msg.citations.length > 0) {
+          const btn = document.createElement("button");
+          btn.textContent = "Show citations";
+          btn.addEventListener("click", () => {
+            openCitations(msg.citations);
+          });
+          footer.appendChild(btn);
+        }
+
+        if (msg.note_ids && msg.note_ids.length > 0) {
+          const span = document.createElement("span");
+          span.textContent = `Attached notes: ${msg.note_ids.length}`;
+          footer.appendChild(span);
+        }
+
+        bubble.appendChild(footer);
+      }
+
+      row.appendChild(bubble);
+      chatMessagesEl.appendChild(row);
+    });
+    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  }
+
+  function renderAttachmentsBanner() {
+    if (attachedNotes.length === 0) {
+      attachmentsBannerEl.textContent = "";
+      return;
+    }
+    const names = attachedNotes.map(n => n.name || "(no name)").join(", ");
+    attachmentsBannerEl.innerHTML = `<span>Attached:</span> ${names}`;
+  }
+
+  function openAttachmentsModal() {
+    if (!allNotes.length) {
+      loadAllNotes().then(() => {
+        attachmentsModalEl.classList.add("show");
+        renderAttachmentsList();
+      }).catch(err => {
+        chatErrorEl.textContent = "Failed to load notes: " + err;
+      });
+    } else {
+      attachmentsModalEl.classList.add("show");
+      renderAttachmentsList();
+    }
+  }
+
+  function closeAttachmentsModal() {
+    attachmentsModalEl.classList.remove("show");
+  }
+
+  async function loadAllNotes() {
+    const resp = await fetch("{{ url_for('api_notes_metadata') }}");
+    const data = await resp.json();
+    if (Array.isArray(data)) {
+      allNotes = data;
+    }
+  }
+
+  function toggleAttach(note) {
+    const ids = new Set(attachedNotes.map(n => n.id));
+    if (ids.has(note.id)) {
+      attachedNotes = attachedNotes.filter(n => n.id !== note.id);
+    } else {
+      attachedNotes = [...attachedNotes, {id: note.id, name: note.name || ""}];
+    }
+    renderAttachmentsList();
+    renderAttachmentsBanner();
+  }
+
+  function renderAttachmentsList() {
+    attachmentsListEl.innerHTML = "";
+    allNotes.forEach(note => {
+      const row = document.createElement("div");
+      row.className = "attachments-item";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = attachedNotes.some(n => n.id === note.id);
+      cb.addEventListener("change", () => toggleAttach(note));
+
+      const label = document.createElement("span");
+      label.textContent = note.name || "(no name)";
+
+      row.appendChild(cb);
+      row.appendChild(label);
+      attachmentsListEl.appendChild(row);
+    });
+  }
+
+  function openCitations(cites) {
+    citationsContentEl.textContent = JSON.stringify(cites, null, 2);
+    citationsModalEl.classList.add("show");
+  }
+
+  function closeCitations() {
+    citationsModalEl.classList.remove("show");
+  }
+
+  async function sendMessage() {
+    const text = chatInputEl.value.trim();
+    if (!text || isSending) {
+      return;
+    }
+
+    isSending = true;
+    chatErrorEl.textContent = "";
+
+    messages.push({
+      sender: "user",
+      text: text,
+      citations: [],
+      note_ids: attachedNotes.map(n => n.id),
+    });
+    renderMessages();
+    chatInputEl.value = "";
+
+    try {
+      const resp = await fetch("{{ url_for('api_chat') }}", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          message: text,
+          note_ids: attachedNotes.map(n => n.id),
+        }),
+      });
+      const data = await resp.json();
+      if (resp.status !== 200 || data.error) {
+        chatErrorEl.textContent = data.error || "Unknown error";
+      } else {
+        messages.push({
+          sender: "ai",
+          text: data.reply || "",
+          citations: data.citations || [],
+          note_ids: attachedNotes.map(n => n.id),
+        });
+        renderMessages();
+      }
+    } catch (err) {
+      chatErrorEl.textContent = "Unexpected error: " + err;
+    } finally {
+      isSending = false;
+    }
+  }
+
+  sendMessageBtn.addEventListener("click", sendMessage);
+  chatInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  });
+
+  openAttachmentsBtn.addEventListener("click", openAttachmentsModal);
+  closeAttachmentsBtn.addEventListener("click", closeAttachmentsModal);
+
+  closeCitationsBtn.addEventListener("click", closeCitations);
+
+  renderMessages();
+  renderAttachmentsBanner();
+</script>
+{% endblock %}

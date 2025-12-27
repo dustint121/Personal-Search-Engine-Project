@@ -1,0 +1,460 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .auth-message {
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #5f6368;
+    white-space: pre-wrap;
+  }
+  .search-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .search-input {
+    width: 100%;
+    max-width: 600px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    border: 1px solid #dadce0;
+    font-size: 14px;
+  }
+  .result-count {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #5f6368;
+  }
+  .results-container {
+    margin-top: 16px;
+  }
+  .result-item {
+    list-style-type: none;
+    margin-bottom: 8px;
+  }
+  .result-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .result-title {
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .result-url {
+    font-size: 12px;
+    color: #5f6368;
+    word-break: break-all;
+  }
+  .tag-bar {
+    margin-top: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+  .tag-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid #dadce0;
+    background-color: #ffffff;
+    cursor: pointer;
+    font-size: 13px;
+    color: #202124;
+  }
+  .tag-pill-x {
+    font-weight: bold;
+    cursor: pointer;
+    color: #5f6368;
+    margin-left: 6px;
+  }
+  .fab-arrow {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    width: 52px;
+    height: 52px;
+    border-radius: 26px;
+    border: none;
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+  /* Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0,0,0,0.4);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  .modal-backdrop.show {
+    display: flex;
+  }
+  .modal-box {
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .modal-close {
+    margin-left: auto;
+    border: none;
+    background: none;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .modal-footer {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .btn-primary {
+    padding: 8px 14px;
+    border-radius: 4px;
+    border: none;
+    background-color: #1a73e8;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .summary-area {
+    margin-top: 16px;
+    font-size: 14px;
+    white-space: pre-wrap;
+  }
+  .summary-error {
+    color: #b91c1c;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="box">
+  <h1 style="margin-bottom: 8px;">Personal OneDrive Search Engine</h1>
+  <div id="auth-message" class="auth-message"></div>
+
+  <div class="search-row">
+    <input id="search-input"
+           class="search-input"
+           type="text"
+           placeholder="Search your OneDrive notes... (press Enter)">
+  </div>
+
+  <div id="result-count" class="result-count"></div>
+
+  <div id="tag-bar" class="tag-bar"></div>
+
+  <div class="results-container">
+    <div id="results-status"></div>
+    <ul id="results-list"></ul>
+  </div>
+</div>
+
+<button id="open-summary-modal" class="fab-arrow">→</button>
+
+<!-- Modal -->
+<div id="summary-modal" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Selected Documents</h3>
+      <button id="close-summary-modal" class="modal-close">×</button>
+    </div>
+
+    <ul id="selected-docs-list"></ul>
+
+    <div class="modal-footer">
+      <button id="run-summarize" class="btn-primary">Summarize</button>
+    </div>
+
+    <div id="summary-text" class="summary-area"></div>
+    <div id="summary-error" class="summary-area summary-error"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const authMessageEl = document.getElementById("auth-message");
+  const searchInputEl = document.getElementById("search-input");
+  const resultCountEl = document.getElementById("result-count");
+  const tagBarEl = document.getElementById("tag-bar");
+  const resultsStatusEl = document.getElementById("results-status");
+  const resultsListEl = document.getElementById("results-list");
+
+  const summaryModalEl = document.getElementById("summary-modal");
+  const openSummaryBtn = document.getElementById("open-summary-modal");
+  const closeSummaryBtn = document.getElementById("close-summary-modal");
+  const selectedDocsListEl = document.getElementById("selected-docs-list");
+  const runSummarizeBtn = document.getElementById("run-summarize");
+  const summaryTextEl = document.getElementById("summary-text");
+  const summaryErrorEl = document.getElementById("summary-error");
+
+  const TAG_LABELS = [
+    "AWS",
+    "Azure",
+    "Spark",
+    "neural networks",
+    "machine learning",
+    "deep learning",
+    "Github",
+    "SQL",
+    "Databricks",
+  ];
+
+  let currentQuery = "";
+  let currentResults = [];
+  let selectedIds = new Set();
+  let currentTags = [...TAG_LABELS];
+  let isLoading = false;
+
+  async function checkAuthStatus() {
+    try {
+      const resp = await fetch("{{ url_for('api_auth_status') }}");
+      const data = await resp.json();
+      if (data.message) {
+        authMessageEl.textContent = data.message;
+      }
+    } catch (err) {
+      authMessageEl.textContent = "Authentication status check failed: " + err;
+    }
+  }
+
+  function renderTagBar() {
+    tagBarEl.innerHTML = "";
+    if (currentQuery || isLoading || currentResults.length > 0 || currentTags.length === 0) {
+      return;
+    }
+    currentTags.forEach(label => {
+      const pill = document.createElement("div");
+      pill.className = "tag-pill";
+      pill.textContent = label;
+
+      const x = document.createElement("span");
+      x.className = "tag-pill-x";
+      x.textContent = "×";
+      x.addEventListener("click", ev => {
+        ev.stopPropagation();
+        currentTags = currentTags.filter(t => t !== label);
+        renderTagBar();
+      });
+
+      pill.addEventListener("click", () => {
+        searchInputEl.value = label;
+        doSearch(label);
+      });
+
+      pill.appendChild(x);
+      tagBarEl.appendChild(pill);
+    });
+  }
+
+  function renderResultCount() {
+    if (isLoading) {
+      resultCountEl.textContent = "";
+      return;
+    }
+    if (!currentQuery) {
+      resultCountEl.textContent = "";
+      return;
+    }
+    const count = currentResults.length;
+    if (count === 0) {
+      resultCountEl.textContent = "0 results found";
+    } else if (count === 1) {
+      resultCountEl.textContent = "1 result found";
+    } else {
+      resultCountEl.textContent = `${count} results found`;
+    }
+  }
+
+  function getDocId(doc) {
+    return String(doc.id || doc.url || doc.title);
+  }
+
+  function renderResults() {
+    resultsListEl.innerHTML = "";
+    resultsStatusEl.textContent = "";
+
+    if (isLoading) {
+      resultsStatusEl.textContent = "Processing query...";
+      return;
+    }
+
+    if (currentQuery && currentResults.length === 0) {
+      resultsStatusEl.textContent = "No results / Search not started.";
+      return;
+    }
+
+    currentResults.forEach(r => {
+      const li = document.createElement("li");
+      li.className = "result-item";
+
+      const labelEl = document.createElement("label");
+      labelEl.className = "result-label";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      const docId = getDocId(r);
+      checkbox.checked = selectedIds.has(docId);
+      checkbox.addEventListener("change", () => {
+        if (selectedIds.has(docId)) {
+          selectedIds.delete(docId);
+        } else {
+          selectedIds.add(docId);
+        }
+      });
+
+      const div = document.createElement("div");
+      const a = document.createElement("a");
+      a.href = r.url;
+      a.className = "result-title";
+      a.textContent = r.title;
+
+      const urlDiv = document.createElement("div");
+      urlDiv.className = "result-url";
+      urlDiv.textContent = r.url;
+
+      div.appendChild(a);
+      div.appendChild(urlDiv);
+
+      labelEl.appendChild(checkbox);
+      labelEl.appendChild(div);
+
+      li.appendChild(labelEl);
+      resultsListEl.appendChild(li);
+    });
+  }
+
+  async function doSearch(qValue) {
+    const q = (qValue ?? searchInputEl.value).trim();
+    currentQuery = q;
+    selectedIds = new Set();
+    summaryTextEl.textContent = "";
+    summaryErrorEl.textContent = "";
+
+    if (!q) {
+      currentResults = [];
+      isLoading = false;
+      renderResultCount();
+      renderTagBar();
+      renderResults();
+      return;
+    }
+
+    isLoading = true;
+    renderResultCount();
+    renderTagBar();
+    renderResults();
+
+    try {
+      const url = new URL("{{ url_for('api_search') }}", window.location.origin);
+      url.searchParams.set("q", q);
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (typeof data === "object" && data && "error" in data) {
+        currentResults = [];
+      } else {
+        currentResults = data;
+      }
+    } catch (err) {
+      currentResults = [];
+    } finally {
+      isLoading = false;
+      renderResultCount();
+      renderTagBar();
+      renderResults();
+    }
+  }
+
+  function openSummaryModal() {
+    const selectedDocs = currentResults.filter(r => selectedIds.has(getDocId(r)));
+    selectedDocsListEl.innerHTML = "";
+    if (selectedDocs.length === 0) {
+      const p = document.createElement("p");
+      p.textContent = "No documents selected.";
+      selectedDocsListEl.appendChild(p);
+    } else {
+      selectedDocs.forEach(doc => {
+        const li = document.createElement("li");
+        li.textContent = doc.title || "(no name)";
+        selectedDocsListEl.appendChild(li);
+      });
+    }
+    summaryTextEl.textContent = "";
+    summaryErrorEl.textContent = "";
+    summaryModalEl.classList.add("show");
+  }
+
+  function closeSummaryModal() {
+    summaryModalEl.classList.remove("show");
+  }
+
+  async function runSummarize() {
+    const ids = [];
+    currentResults.forEach(r => {
+      const id = getDocId(r);
+      if (selectedIds.has(id)) {
+        ids.push(r.id);  // the OneDrive ID
+      }
+    });
+
+    if (ids.length === 0) {
+      summaryErrorEl.textContent = "No documents selected to summarize.";
+      return;
+    }
+
+    summaryTextEl.textContent = "Summarizing selected documents...";
+    summaryErrorEl.textContent = "";
+
+    try {
+      const resp = await fetch("{{ url_for('api_summarize') }}", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ids: ids, source: "cloud"})
+      });
+      const data = await resp.json();
+      if (resp.status !== 200 || data.error) {
+        summaryErrorEl.textContent = data.error || "Unknown error";
+        summaryTextEl.textContent = "";
+      } else {
+        summaryTextEl.textContent = data.summary || "";
+        summaryErrorEl.textContent = "";
+      }
+    } catch (err) {
+      summaryErrorEl.textContent = "Unexpected error: " + err;
+      summaryTextEl.textContent = "";
+    }
+  }
+
+  searchInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      doSearch();
+    }
+  });
+
+  openSummaryBtn.addEventListener("click", openSummaryModal);
+  closeSummaryBtn.addEventListener("click", closeSummaryModal);
+  runSummarizeBtn.addEventListener("click", runSummarize);
+
+  checkAuthStatus();
+  renderTagBar();
+</script>
+{% endblock %}
