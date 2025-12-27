@@ -7,6 +7,7 @@
     font-size: 13px;
     color: #5f6368;
     white-space: pre-wrap;
+    text-align: center; /* center auth text */
   }
   .search-row {
     display: flex;
@@ -25,6 +26,7 @@
     margin-top: 8px;
     font-size: 13px;
     color: #5f6368;
+    text-align: center; /* center result count text */
   }
   .results-container {
     margin-top: 16px;
@@ -148,7 +150,9 @@
 
 {% block content %}
 <div class="box">
-  <h1 style="margin-bottom: 8px;">Personal OneDrive Search Engine</h1>
+  <h1 style="margin-bottom: 8px; text-align: center;">
+    Personal OneDrive Search Engine
+  </h1>
   <div id="auth-message" class="auth-message"></div>
 
   <div class="search-row">

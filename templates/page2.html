@@ -73,7 +73,8 @@
     gap: 8px;
   }
   .chat-textarea {
-    width: 100%;
+    width: 98%;              /* slightly narrower than container */
+    max-width: 100%;         /* avoid overflow */
     min-height: 80px;
     max-height: 200px;
     padding: 10px 12px;
@@ -81,6 +82,7 @@
     border: 1px solid #d1d5db;
     font-size: 14px;
     resize: vertical;
+    box-sizing: border-box;  /* include padding in width */
   }
   .chat-actions {
     display: flex;
@@ -177,7 +179,9 @@
 
 {% block content %}
 <div class="box">
-  <h1 style="margin-bottom: 12px;">Notes Chatbot</h1>
+  <h1 style="margin-bottom: 12px; text-align: center;">
+    Notes Chatbot
+  </h1>
 
   <div class="chat-container">
     <div id="chat-messages" class="chat-messages"></div>
