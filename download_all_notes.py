@@ -72,26 +72,26 @@ if __name__ == "__main__":
     with open("notes_metadata.json", "w") as f:
         json.dump(list_of_notes, f)
 
-    print(f"Found {len(list_of_notes)} notes.")
-    count = 0
-    os.makedirs("note_files", exist_ok=True)
-    for note in list_of_notes:
-        #check if file already exists
-        if os.path.exists(f"note_files/{note['id']}"):
-            print(f"File {note['name']} already exists. Skipping download.")
-            count += 1
-            continue
-        print(f"Downloading note #{count + 1} of {len(list_of_notes)}: {note['name']}")
-        note_id = note['id']
-        download_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{note_id}/content"
-        download_response = requests.get(download_url, headers=headers)
-        if download_response.status_code == 200:    
-            # store as binary file
-            with open(f"note_files/{note_id}", "wb") as f:
-                f.write(download_response.content)
-        else:
-            print(f"Failed to download {note['name']}")
-        count += 1
+    # print(f"Found {len(list_of_notes)} notes.")
+    # count = 0
+    # os.makedirs("note_files", exist_ok=True)
+    # for note in list_of_notes:
+    #     #check if file already exists
+    #     if os.path.exists(f"note_files/{note['id']}"):
+    #         print(f"File {note['name']} already exists. Skipping download.")
+    #         count += 1
+    #         continue
+    #     print(f"Downloading note #{count + 1} of {len(list_of_notes)}: {note['name']}")
+    #     note_id = note['id']
+    #     download_url = f"https://graph.microsoft.com/v1.0/me/drive/items/{note_id}/content"
+    #     download_response = requests.get(download_url, headers=headers)
+    #     if download_response.status_code == 200:    
+    #         # store as binary file
+    #         with open(f"note_files/{note_id}", "wb") as f:
+    #             f.write(download_response.content)
+    #     else:
+    #         print(f"Failed to download {note['name']}")
+    #     count += 1
 
 
 #total of 51 files for about 750 MB total

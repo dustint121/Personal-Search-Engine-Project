@@ -62,12 +62,12 @@ Official Documentation for API: https://docs.perplexity.ai/getting-started/overv
 3. Run
 >python get_authentication.py
 
-Will generate token_cache.bin for authencation after login into Microsoft account with external link. Should be a one-time request before automatically giving recredentials for every future request/reset.
+Will generate token_cache.bin for authencation after logging into Microsoft account with external link. Should be a one-time request before automatically giving recredentials for every future request/reset.
 
 4. Run
 >python download_all_notes.py
 
-Will download majority of note-related .docx documents locally to "note_files" folder as binary files.
+Will download majority of metadata for note-related .docx documents into notes_metadata.json
 
 5. Run
 >python app_front.py

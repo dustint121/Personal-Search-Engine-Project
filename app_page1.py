@@ -1,4 +1,5 @@
 # app_page1.py
+
 from reactpy import component, html, hooks
 import httpx
 
@@ -9,7 +10,6 @@ from app_styles import (
     result_title_style,
     result_url_style,
 )
-
 
 TAG_LABELS = [
     "AWS",
@@ -32,15 +32,13 @@ def Page1():
 
     # Track selected document IDs (strings)
     selected_ids, set_selected_ids = hooks.use_state(set())
+
     show_modal, set_show_modal = hooks.use_state(False)
 
     # Perplexity summary state
     summary_loading, set_summary_loading = hooks.use_state(False)
     summary_text, set_summary_text = hooks.use_state("")
     summary_error, set_summary_error = hooks.use_state("")
-
-    # Whether to use local files vs Graph in summarization
-    use_local_source, set_use_local_source = hooks.use_state(False)
 
     # Tags currently visible (static labels but removable)
     tags, set_tags = hooks.use_state(TAG_LABELS)
@@ -61,8 +59,8 @@ def Page1():
             return
 
         set_query(q)
-
         set_is_loading(True)
+
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
@@ -102,7 +100,6 @@ def Page1():
         return [r for r in results if get_doc_id(r) in selected_ids]
 
     # Tag interactions
-# Tag interactions
     def handle_tag_click(label: str):
         # Just fill the search box; user presses Enter to run search
         set_query(label)
@@ -110,6 +107,7 @@ def Page1():
     def on_tag_remove(label: str):
         def updater(prev_tags):
             return [t for t in prev_tags if t != label]
+
         set_tags(updater)
 
     # Result count
@@ -217,10 +215,8 @@ def Page1():
                     "color": "#5f6368",
                 }
             },
-            result_count_text,
-        )
-        if result_count_text
-        else None,
+            result_count_text if result_count_text else None,
+        ),
         tag_bar,
         html.div(
             {"style": results_container_style},
@@ -248,8 +244,7 @@ def Page1():
                                     html.input(
                                         {
                                             "type": "checkbox",
-                                            "checked": get_doc_id(r)
-                                            in selected_ids,
+                                            "checked": get_doc_id(r) in selected_ids,
                                             "on_change": (
                                                 lambda event, doc_id=get_doc_id(
                                                     r
@@ -319,6 +314,7 @@ def Page1():
         set_summary_loading(True)
         set_summary_error("")
         set_summary_text("")
+
         try:
             timeout = httpx.Timeout(120.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -326,7 +322,8 @@ def Page1():
                     "http://127.0.0.1:5000/api/summarize",
                     json={
                         "ids": ids,
-                        "source": "local" if use_local_source else "cloud",
+                        # Backend now always uses cloud; this field kept for compatibility
+                        "source": "cloud",
                     },
                 )
                 data = resp.json()
@@ -343,13 +340,9 @@ def Page1():
         finally:
             set_summary_loading(False)
 
-    # Modal overlay
+    # Modal overlay (now always cloud – no local toggle)
     selected_docs = get_selected_docs()
-    source_label = (
-        "Using local note_files for document content."
-        if use_local_source
-        else "Using cloud (Graph API) for document content."
-    )
+    source_label = "Using cloud (Graph API) for document content."
 
     modal = (
         html.div(
@@ -404,37 +397,13 @@ def Page1():
                         "X",
                     ),
                 ),
-                (
-                    html.ul(
-                        [
-                            html.li(doc.get("title", "(no name)"))
-                            for doc in selected_docs
-                        ]
-                    )
+                html.ul(
+                    [
+                        html.li(doc.get("title", "(no name)"))
+                        for doc in selected_docs
+                    ]
                     if selected_docs
                     else html.p("No documents selected.")
-                ),
-                html.div(
-                    {
-                        "style": {
-                            "margin_top": "12px",
-                            "display": "flex",
-                            "align_items": "center",
-                            "gap": "6px",
-                        }
-                    },
-                    html.input(
-                        {
-                            "type": "checkbox",
-                            "checked": use_local_source,
-                            "on_change": (
-                                lambda event: set_use_local_source(
-                                    not use_local_source
-                                )
-                            ),
-                        }
-                    ),
-                    html.span("Use local note_files instead of cloud (Graph)"),
                 ),
                 html.div(
                     {
@@ -482,11 +451,7 @@ def Page1():
                     (
                         f"{source_label} Summarizing selected documents..."
                         if summary_loading
-                        else (
-                            summary_error
-                            if summary_error
-                            else summary_text
-                        )
+                        else (summary_error if summary_error else summary_text)
                     ),
                 ),
             ),

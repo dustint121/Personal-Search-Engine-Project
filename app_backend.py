@@ -1,4 +1,5 @@
 # app_backend.py
+
 import os
 import json
 import atexit
@@ -25,9 +26,8 @@ ONEDRIVE_DOCUMENTS_FOLDER_ID = os.getenv("ONEDRIVE_DOCUMENTS_FOLDER_ID")
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 PPLX_CLIENT = Perplexity(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai")
 
-# Local notes
+# Notes metadata (catalog only – no local note_files usage)
 BASE_DIR = os.path.dirname(__file__)
-NOTE_FILES_DIR = os.path.join(BASE_DIR, "note_files")
 NOTES_METADATA_PATH = os.path.join(BASE_DIR, "notes_metadata.json")
 
 # Simple in-memory chat history (single-user dev)
@@ -71,9 +71,7 @@ def get_token(msal_app: PublicClientApplication) -> str:
     if "access_token" in result:
         return result["access_token"]
 
-    raise RuntimeError(
-        "Authentication failed: {}".format(result.get("error_description"))
-    )
+    raise RuntimeError("Authentication failed: {}".format(result.get("error_description")))
 
 
 def get_graph_headers():
@@ -130,6 +128,9 @@ def save_notes_metadata(notes):
 
 
 def append_note_metadata_if_missing(note_id: str, name: str = "", web_url: str = ""):
+    """
+    Kept in case you still want to extend metadata, but no longer writes any local files.
+    """
     notes = load_notes_metadata()
     if any(n.get("id") == note_id for n in notes):
         return
@@ -137,15 +138,11 @@ def append_note_metadata_if_missing(note_id: str, name: str = "", web_url: str =
     save_notes_metadata(notes)
 
 
-def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
-    local_path = os.path.join(NOTE_FILES_DIR, item_id)
-
-    if source == "local":
-        if os.path.exists(local_path):
-            with open(local_path, "rb") as f:
-                return f.read()
-        # fall through to download and then save
-
+def retrieve_document_content(item_id: str) -> bytes:
+    """
+    Retrieve a document's bytes directly from Graph.
+    No local note_files folder is used.
+    """
     headers = get_graph_headers()
     url = (
         f"https://graph.microsoft.com/v1.0/drives/"
@@ -157,19 +154,11 @@ def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
             f"Failed to retrieve document content from {url}: "
             f"{response.status_code} {response.text}"
         )
-    content_bytes = response.content
-
-    if source == "local":
-        os.makedirs(NOTE_FILES_DIR, exist_ok=True)
-        with open(local_path, "wb") as f:
-            f.write(content_bytes)
-        # minimal metadata entry (id only)
-        append_note_metadata_if_missing(item_id)
-
-    return content_bytes
+    return response.content
 
 
 # === API routes ===
+
 
 @app.route("/api/search")
 def api_search():
@@ -189,14 +178,14 @@ def api_notes_metadata():
 def api_summarize():
     payload = request.get_json(silent=True) or {}
     ids = payload.get("ids", [])
-    source = payload.get("source", "cloud")
+    # source value from frontend is now ignored; always use Graph
     if not ids:
         return jsonify({"error": "No ids provided"}), 400
 
     try:
         file_contents = []
         for item_id in ids:
-            content_bytes = retrieve_document_content(item_id, source=source)
+            content_bytes = retrieve_document_content(item_id)
             encoded = base64.b64encode(content_bytes).decode("utf-8")
             file_contents.append(encoded)
 
@@ -218,7 +207,7 @@ def api_summarize():
             messages=[{"role": "user", "content": content}],
         )
         summary_text = response.choices[0].message.content
-        return jsonify({"summary": summary_text, "source": source})
+        return jsonify({"summary": summary_text, "source": "cloud"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -232,20 +221,13 @@ def api_chat():
     if not user_text:
         return jsonify({"error": "Empty message"}), 400
 
-    # 1. Build content with text + attached files (like api_summarize & test_LLM2)[file:235][file:236]
-    content = [
-        {
-            "type": "text",
-            "text": user_text,
-        }
-    ]
-
+    # Build content with text + attached files (directly from Graph)
+    content = [{"type": "text", "text": user_text}]
     file_contents = []
+
     try:
         for note_id in note_ids:
-            # use local cache first; fall back to Graph download, same as api_summarize
-            # source="local" lets retrieve_document_content save to note_files if needed
-            content_bytes = retrieve_document_content(note_id, source="local")
+            content_bytes = retrieve_document_content(note_id)
             encoded = base64.b64encode(content_bytes).decode("utf-8")
             file_contents.append(encoded)
 
@@ -259,17 +241,10 @@ def api_chat():
     except Exception as e:
         return jsonify({"error": f"Failed to load attachments: {e}"}), 500
 
-    # 2. Use a single-turn message with rich content (keeps CHAT_HISTORY simple for now)
-    # If you want multi-turn, you can push this content into CHAT_HISTORY instead.
     try:
         response = PPLX_CLIENT.chat.completions.create(
             model="sonar",
-            messages=[
-                {
-                    "role": "user",
-                    "content": content,
-                }
-            ],
+            messages=[{"role": "user", "content": content}],
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -278,6 +253,3 @@ def api_chat():
     citations = getattr(response, "citations", []) or []
 
     return jsonify({"reply": reply, "citations": citations})
-
-
-# NOTE: app.run is in app_front.py via ReactPy configure

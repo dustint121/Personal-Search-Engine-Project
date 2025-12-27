@@ -4,8 +4,5 @@
 /test_files
 /note_files
 /__pycache__
-test.json
-notes_list.json
 token_cache.bin
-test.txt
 notes_metadata.json
