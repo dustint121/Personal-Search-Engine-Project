@@ -14,19 +14,22 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# === OneDrive / Microsoft Graph configuration ===[file:194][file:193]
+# === OneDrive / Microsoft Graph configuration ===
 CLIENT_ID = os.getenv("CLIENT_ID")
 AUTHORITY = "https://login.microsoftonline.com/common"
 SCOPES = ["Files.Read.All"]
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "token_cache.bin")
 ONEDRIVE_DOCUMENTS_FOLDER_ID = os.getenv("ONEDRIVE_DOCUMENTS_FOLDER_ID")
 
-# === Perplexity API configuration ===[file:193]
+# === Perplexity API configuration ===
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 PPLX_CLIENT = Perplexity(
     api_key=PERPLEXITY_API_KEY,
     base_url="https://api.perplexity.ai",
 )
+
+# Local notes directory used by download_all_notes.py
+NOTE_FILES_DIR = os.path.join(os.path.dirname(__file__), "note_files")
 
 
 def load_cache():
@@ -46,7 +49,7 @@ def load_cache():
 def get_token(msal_app: PublicClientApplication) -> str:
     """
     Get an access token using MSAL, preferring silent auth and
-    falling back to device code flow on first run.[file:194][file:193]
+    falling back to device code flow on first run.
     """
     # 1. Try silent first
     accounts = msal_app.get_accounts()
@@ -84,7 +87,7 @@ def search_onedrive_docx(query: str):
     """
     Call Microsoft Graph /me/drive/root/search for .docx files
     that match the query string and return a simple list of
-    {id, title, url} objects for the frontend.[file:194]
+    {id, title, url} objects for the frontend.
     """
     if not query:
         return []
@@ -119,10 +122,20 @@ def search_onedrive_docx(query: str):
     return results
 
 
-def retrieve_document_content(item_id: str) -> bytes:
+def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
     """
-    Download the raw file bytes for a OneDrive item using its id.[file:193]
+    Get raw bytes for a document either from local disk or from Graph.
+    source: "local" or "cloud"
     """
+    if source == "local":
+        # Local binary files saved by download_all_notes.py as note_files/<id>
+        local_path = os.path.join(NOTE_FILES_DIR, item_id)
+        if not os.path.exists(local_path):
+            raise RuntimeError(f"Local file not found for id {item_id}: {local_path}")
+        with open(local_path, "rb") as f:
+            return f.read()
+
+    # Default: cloud / Graph API
     headers = get_graph_headers()
     url = (
         f"https://graph.microsoft.com/v1.0/drives/"
@@ -152,58 +165,49 @@ def api_search():
 @app.route("/api/summarize", methods=["POST"])
 def api_summarize():
     """
-    Body: { "ids": ["id1", "id2", ...] }
-    Returns: { "summary": "text from Perplexity" }
+    Body: { "ids": ["id1", "id2", ...], "source": "local" | "cloud" }
+    Returns: { "summary": "text from Perplexity", "source": "..." }
     """
     payload = request.get_json(silent=True) or {}
     ids = payload.get("ids", [])
+    source = payload.get("source", "cloud")  # default: cloud/Graph
+
     if not ids:
         return jsonify({"error": "No ids provided"}), 400
 
     try:
-        # 1. Fetch document bytes for each id
+        # 1. Fetch document bytes for each id from chosen source
         file_contents = []
         for item_id in ids:
-            content_bytes = retrieve_document_content(item_id)
+            content_bytes = retrieve_document_content(item_id, source=source)
             encoded = base64.b64encode(content_bytes).decode("utf-8")
             file_contents.append(encoded)
 
-        # 2. Build Perplexity content array with static prompt[file:193]
+        # 2. Build Perplexity content array with static prompt
         prompt = (
-            "You are summarizing a set of Microsoft Word documents from my OneDrive. "
+            "You are summarizing a set of Microsoft Word documents from my notes. "
             "For each attached document, provide a short (2–3 sentence) summary. "
             "Then provide a brief (3–5 bullet) overall summary that synthesizes key themes "
             "across all documents."
         )
 
-        content = [
-            {
-                "type": "text",
-                "text": prompt,
-            }
-        ]
-
-        # For now, send each file as a base64 'file_url.url' block (mirroring test_both_api).[file:193]
+        content = [{"type": "text", "text": prompt}]
         for encoded_data in file_contents:
             content.append(
                 {
                     "type": "file_url",
-                    "file_url": {
-                        "url": encoded_data
-                    },
+                    "file_url": {"url": encoded_data},
                 }
             )
 
         # 3. Call Perplexity
         response = PPLX_CLIENT.chat.completions.create(
             model="sonar",
-            messages=[
-                {"role": "user", "content": content},
-            ],
+            messages=[{"role": "user", "content": content}],
         )
 
         summary_text = response.choices[0].message.content
-        return jsonify({"summary": summary_text})
+        return jsonify({"summary": summary_text, "source": source})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

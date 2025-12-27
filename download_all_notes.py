@@ -74,6 +74,7 @@ if __name__ == "__main__":
         #check if file already exists
         if os.path.exists(f"note_files/{note['id']}"):
             print(f"File {note['name']} already exists. Skipping download.")
+            count += 1
             continue
         print(f"Downloading note #{count + 1} of {len(list_of_notes)}: {note['name']}")
         note_id = note['id']
@@ -90,4 +91,4 @@ if __name__ == "__main__":
 
 #total of 51 files for about 750 MB total
 
-# 10 minutes to download all files
+# 10-20 minutes to download all files; may need to run multiple times due to requests timeouts

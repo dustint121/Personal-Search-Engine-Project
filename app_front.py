@@ -28,10 +28,13 @@ def RootApp():
     selected_ids, set_selected_ids = hooks.use_state(set())
     show_modal, set_show_modal = hooks.use_state(False)
 
-    # State for Perplexity summary in the modal
+    # Perplexity summary state
     summary_loading, set_summary_loading = hooks.use_state(False)
     summary_text, set_summary_text = hooks.use_state("")
     summary_error, set_summary_error = hooks.use_state("")
+
+    # New: whether to use local files vs Graph
+    use_local_source, set_use_local_source = hooks.use_state(False)
 
     async def submit_search():
         q_value = query.strip()
@@ -163,7 +166,6 @@ def RootApp():
                                             "gap": "8px",
                                         }
                                     },
-                                    # Checkbox
                                     html.input(
                                         {
                                             "type": "checkbox",
@@ -248,12 +250,14 @@ def RootApp():
         set_summary_error("")
         set_summary_text("")
         try:
-            # Increase timeout to e.g. 120 seconds to allow Graph + Perplexity work[web:178]
             timeout = httpx.Timeout(120.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(
                     "http://127.0.0.1:5000/api/summarize",
-                    json={"ids": ids},
+                    json={
+                        "ids": ids,
+                        "source": "local" if use_local_source else "cloud",
+                    },
                 )
                 data = resp.json()
                 if resp.status_code != 200 or "error" in data:
@@ -261,7 +265,9 @@ def RootApp():
                 else:
                     set_summary_text(data.get("summary", ""))
         except httpx.ReadTimeout:
-            set_summary_error("Summarization request timed out. Please try again or select fewer documents.")
+            set_summary_error(
+                "Summarization request timed out. Please try again or select fewer documents."
+            )
         except Exception as e:
             set_summary_error(f"Unexpected error: {e}")
         finally:
@@ -269,6 +275,12 @@ def RootApp():
 
     # Modal overlay listing selected documents and summary
     selected_docs = get_selected_docs()
+    source_label = (
+        "Using local note_files for document content."
+        if use_local_source
+        else "Using cloud (Graph API) for document content."
+    )
+
     modal = (
         html.div(
             {
@@ -333,6 +345,40 @@ def RootApp():
                     if selected_docs
                     else html.p("No documents selected.")
                 ),
+                # Source toggle checkbox
+                html.div(
+                    {
+                        "style": {
+                            "margin_top": "12px",
+                            "display": "flex",
+                            "align_items": "center",
+                            "gap": "6px",
+                        }
+                    },
+                    html.input(
+                        {
+                            "type": "checkbox",
+                            "checked": use_local_source,
+                            "on_change": (
+                                lambda event: set_use_local_source(
+                                    not use_local_source
+                                )
+                            ),
+                        }
+                    ),
+                    html.span("Use local note_files instead of cloud (Graph)"),
+                ),
+                # Source status line
+                html.div(
+                    {
+                        "style": {
+                            "margin_top": "8px",
+                            "font_size": "13px",
+                            "color": "#5f6368",
+                        }
+                    },
+                    source_label,
+                ),
                 # Summarize button
                 html.div(
                     {
@@ -369,12 +415,15 @@ def RootApp():
                         }
                     },
                     (
-                        "Summarizing selected documents..."
-                        if summary_loading
-                        else (
-                            summary_error
-                            if summary_error
-                            else summary_text
+                        # Your requested message before summarization
+                        (
+                            f"{source_label} Summarizing selected documents..."
+                            if summary_loading
+                            else (
+                                summary_error
+                                if summary_error
+                                else summary_text
+                            )
                         )
                     ),
                 ),
