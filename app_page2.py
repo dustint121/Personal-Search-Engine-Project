@@ -43,28 +43,58 @@ def Page2():
                 "sender": "ai",
                 "text": "Hi, I’m your notes chatbot. Ask me anything about your documents or ideas.",
                 "citations": [],
+                "note_ids": [],
             }
         ]
     )
     input_text, set_input_text = hooks.use_state("")
     is_sending, set_is_sending = hooks.use_state(False)
     error_text, set_error_text = hooks.use_state("")
-    # For citations popup
+
+    # citations popup
     show_citations, set_show_citations = hooks.use_state(False)
     current_citations, set_current_citations = hooks.use_state([])
+
+    # attachments
+    attached_notes, set_attached_notes = hooks.use_state([])  # list of {id,name}
+    all_notes, set_all_notes = hooks.use_state([])
+    show_attachments, set_show_attachments = hooks.use_state(False)
 
     async def on_input(event):
         set_input_text(event["target"]["value"])
 
     def on_keydown(event):
-        # Send on Enter (without Shift) and don't insert newline
         if event.get("key") == "Enter" and not event.get("shift_key"):
-            event["prevent_default"] = True  # optional, avoids newline
-            send_message()
+            event["prevent_default"] = True
+            # call async send_message; ReactPy will handle coroutine
+            return send_message()
 
     def open_citations(cites):
         set_current_citations(cites or [])
         set_show_citations(True)
+
+    async def open_attachments(event=None):
+        if not all_notes:
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        "http://127.0.0.1:5000/api/notes-metadata"
+                    )
+                    data = resp.json()
+                    if isinstance(data, list):
+                        set_all_notes(data)
+            except Exception as e:
+                set_error_text(f"Failed to load notes: {e}")
+        set_show_attachments(True)
+
+    def toggle_attach(note):
+        def updater(prev):
+            ids = {n["id"] for n in prev}
+            if note["id"] in ids:
+                return [n for n in prev if n["id"] != note["id"]]
+            return prev + [{"id": note["id"], "name": note.get("name", "")}]
+
+        set_attached_notes(updater)
 
     async def send_message(event=None):
         nonlocal messages, input_text
@@ -72,13 +102,16 @@ def Page2():
         if not text or is_sending:
             return
 
-        # Clear input immediately so UI updates regardless of API timing
-        set_input_text("")
+        note_ids = [n["id"] for n in attached_notes]
 
-        # append user message locally
-        new_messages = messages + [{"sender": "user", "text": text, "citations": []}]
-        set_messages(new_messages)
+        # clear input immediately
+        set_input_text("")
         set_error_text("")
+
+        new_messages = messages + [
+            {"sender": "user", "text": text, "citations": [], "note_ids": note_ids}
+        ]
+        set_messages(new_messages)
         set_is_sending(True)
 
         try:
@@ -86,7 +119,7 @@ def Page2():
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(
                     "http://127.0.0.1:5000/api/chat",
-                    json={"message": text},
+                    json={"message": text, "note_ids": note_ids},
                 )
                 data = resp.json()
                 if resp.status_code != 200 or "error" in data:
@@ -100,13 +133,19 @@ def Page2():
         finally:
             set_is_sending(False)
 
+        set_attached_notes([])
         set_messages(
             new_messages
-            + [{"sender": "ai", "text": reply, "citations": citations}]
+            + [
+                {
+                    "sender": "ai",
+                    "text": reply,
+                    "citations": citations,
+                    "note_ids": [],
+                }
+            ]
         )
 
-
-    # Citations modal
     citations_modal = (
         html.div(
             {
@@ -165,7 +204,11 @@ def Page2():
                         [
                             html.li(
                                 html.a(
-                                    {"href": url, "target": "_blank", "rel": "noreferrer"},
+                                    {
+                                        "href": url,
+                                        "target": "_blank",
+                                        "rel": "noreferrer",
+                                    },
                                     url,
                                 )
                             )
@@ -179,6 +222,93 @@ def Page2():
             ),
         )
         if show_citations
+        else None
+    )
+
+    attachments_modal = (
+        html.div(
+            {
+                "style": {
+                    "position": "fixed",
+                    "top": "0",
+                    "left": "0",
+                    "width": "100vw",
+                    "height": "100vh",
+                    "background_color": "rgba(0,0,0,0.4)",
+                    "display": "flex",
+                    "justify_content": "center",
+                    "align_items": "center",
+                    "z_index": "1500",
+                }
+            },
+            html.div(
+                {
+                    "style": {
+                        "background_color": "#ffffff",
+                        "padding": "16px",
+                        "border_radius": "8px",
+                        "max_width": "600px",
+                        "width": "90%",
+                        "max_height": "70vh",
+                        "overflow_y": "auto",
+                        "box_shadow": "0 2px 8px rgba(0,0,0,0.25)",
+                        "font_size": "14px",
+                    }
+                },
+                html.div(
+                    {
+                        "style": {
+                            "display": "flex",
+                            "justify_content": "space_between",
+                            "align_items": "center",
+                            "margin_bottom": "8px",
+                        }
+                    },
+                    html.b("Attach notes"),
+                    html.button(
+                        {
+                            "on_click": lambda event: set_show_attachments(False),
+                            "style": {
+                                "border": "none",
+                                "background": "none",
+                                "cursor": "pointer",
+                                "font_size": "16px",
+                            },
+                        },
+                        "×",
+                    ),
+                ),
+                html.ul(
+                    [
+                        html.li(
+                            {
+                                "style": {
+                                    "display": "flex",
+                                    "align_items": "center",
+                                    "justify_content": "space_between",
+                                    "margin_bottom": "4px",
+                                }
+                            },
+                            html.span(note.get("name", note.get("id", ""))),
+                            html.input(
+                                {
+                                    "type": "checkbox",
+                                    "checked": any(
+                                        n["id"] == note["id"]
+                                        for n in attached_notes
+                                    ),
+                                    "on_change": (
+                                        lambda event, n=note: toggle_attach(n)
+                                    ),
+                                }
+                            ),
+                        )
+                        for note in all_notes
+                    ]
+                ),
+            ),
+        )
+        if show_attachments
         else None
     )
 
@@ -237,7 +367,6 @@ def Page2():
                     },
                     html.div(
                         {"style": _bubble_style(msg["sender"])},
-                        # Bubble content + optional info icon for AI
                         html.div(
                             {
                                 "style": {
@@ -311,6 +440,20 @@ def Page2():
             ),
             html.button(
                 {
+                    "on_click": open_attachments,
+                    "style": {
+                        "padding": "6px 8px",
+                        "border_radius": "999px",
+                        "border": "1px solid #dadce0",
+                        "background_color": "#ffffff",
+                        "cursor": "pointer",
+                        "font_size": "16px",
+                    },
+                },
+                "📎",
+            ),
+            html.button(
+                {
                     "on_click": send_message,
                     "disabled": is_sending,
                     "style": {
@@ -328,4 +471,5 @@ def Page2():
             ),
         ),
         citations_modal,
+        attachments_modal,
     )

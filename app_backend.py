@@ -23,26 +23,24 @@ ONEDRIVE_DOCUMENTS_FOLDER_ID = os.getenv("ONEDRIVE_DOCUMENTS_FOLDER_ID")
 
 # === Perplexity API configuration ===
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
-PPLX_CLIENT = Perplexity(
-    api_key=PERPLEXITY_API_KEY,
-    base_url="https://api.perplexity.ai",
-)
+PPLX_CLIENT = Perplexity(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai")
 
-# Local notes directory used by download_all_notes.py
-NOTE_FILES_DIR = os.path.join(os.path.dirname(__file__), "note_files")
+# Local notes
+BASE_DIR = os.path.dirname(__file__)
+NOTE_FILES_DIR = os.path.join(BASE_DIR, "note_files")
+NOTES_METADATA_PATH = os.path.join(BASE_DIR, "notes_metadata.json")
 
-# Simple in-memory chat history per session (single-user / dev only)
+# Simple in-memory chat history (single-user dev)
 CHAT_HISTORY = [
     {
         "role": "system",
         "content": (
             "You are a friendly chatbot in a web app. "
             "Keep replies brief and to-the-point unless the user asks for detail. "
-            "You should not be referencing or citing any external sources (i.e. websites)."
+            "You can reference attached note files as needed."
         ),
     }
 ]
-
 
 
 def load_cache():
@@ -50,7 +48,6 @@ def load_cache():
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
             cache.deserialize(f.read())
-    # persist cache on exit only if changed
     atexit.register(
         lambda: open(CACHE_FILE, "w").write(cache.serialize())
         if cache.has_state_changed
@@ -60,18 +57,12 @@ def load_cache():
 
 
 def get_token(msal_app: PublicClientApplication) -> str:
-    """
-    Get an access token using MSAL, preferring silent auth and
-    falling back to device code flow on first run.
-    """
-    # 1. Try silent first
     accounts = msal_app.get_accounts()
     if accounts:
         result = msal_app.acquire_token_silent(SCOPES, account=accounts[0])
         if result and "access_token" in result:
             return result["access_token"]
 
-    # 2. Device code flow if no valid token/refresh token
     flow = msal_app.initiate_device_flow(scopes=SCOPES)
     if "user_code" not in flow:
         raise RuntimeError("Failed to create device flow. Check app registration.")
@@ -97,34 +88,26 @@ def get_graph_headers():
 
 
 def search_onedrive_docx(query: str):
-    """
-    Call Microsoft Graph /me/drive/root/search for .docx files
-    that match the query string and return a simple list of
-    {id, title, url} objects for the frontend.
-    """
     if not query:
         return []
 
     headers = get_graph_headers()
-
     url = (
         "https://graph.microsoft.com/v1.0/me/drive/root/"
         f"search(q='{query}')"
         "?$filter=endswith(name,'.docx')"
         "&$select=name,id,webUrl"
     )
-
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     data = response.json()
 
-    # Optional: still save raw output for debugging
     os.makedirs("output", exist_ok=True)
     with open("output/query_result.json", "w") as f:
         json.dump(data, f, indent=4)
 
     items = data.get("value", [])
-    results = [
+    return [
         {
             "id": item.get("id"),
             "title": item.get("name", "(no name)"),
@@ -132,27 +115,37 @@ def search_onedrive_docx(query: str):
         }
         for item in items
     ]
-    return results
+
+
+def load_notes_metadata():
+    if not os.path.exists(NOTES_METADATA_PATH):
+        return []
+    with open(NOTES_METADATA_PATH, "r") as f:
+        return json.load(f)
+
+
+def save_notes_metadata(notes):
+    with open(NOTES_METADATA_PATH, "w") as f:
+        json.dump(notes, f, indent=2)
+
+
+def append_note_metadata_if_missing(note_id: str, name: str = "", web_url: str = ""):
+    notes = load_notes_metadata()
+    if any(n.get("id") == note_id for n in notes):
+        return
+    notes.append({"id": note_id, "name": name, "webUrl": web_url})
+    save_notes_metadata(notes)
 
 
 def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
-    """
-    Get raw bytes for a document either from local disk or from Graph.
-    If source == "local" and the local file doesn't exist, download it
-    from Graph into note_files/ before returning its content.[file:196]
-    """
-    # Local path where download_all_notes.py stores files
     local_path = os.path.join(NOTE_FILES_DIR, item_id)
 
     if source == "local":
-        # If already downloaded, just read it.
         if os.path.exists(local_path):
             with open(local_path, "rb") as f:
                 return f.read()
-        # Otherwise, fall through to a one-off download from Graph
-        # and save it locally before returning.
+        # fall through to download and then save
 
-    # Use Graph API to fetch the file (for both "cloud" and "local" when missing)
     headers = get_graph_headers()
     url = (
         f"https://graph.microsoft.com/v1.0/drives/"
@@ -164,58 +157,53 @@ def retrieve_document_content(item_id: str, source: str = "cloud") -> bytes:
             f"Failed to retrieve document content from {url}: "
             f"{response.status_code} {response.text}"
         )
-
     content_bytes = response.content
 
-    # If the user requested local mode, cache the file into note_files/<id>[file:196]
     if source == "local":
         os.makedirs(NOTE_FILES_DIR, exist_ok=True)
         with open(local_path, "wb") as f:
             f.write(content_bytes)
+        # minimal metadata entry (id only)
+        append_note_metadata_if_missing(item_id)
 
     return content_bytes
 
-# === Flask API routes ===
+
+# === API routes ===
 
 @app.route("/api/search")
 def api_search():
     q = request.args.get("q", "")
     try:
-        results = search_onedrive_docx(q)
-        return jsonify(results)
+        return jsonify(search_onedrive_docx(q))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/notes-metadata")
+def api_notes_metadata():
+    return jsonify(load_notes_metadata())
+
+
 @app.route("/api/summarize", methods=["POST"])
 def api_summarize():
-    """
-    Body: { "ids": ["id1", "id2", ...], "source": "local" | "cloud" }
-    Returns: { "summary": "text from Perplexity", "source": "..." }
-    """
     payload = request.get_json(silent=True) or {}
     ids = payload.get("ids", [])
-    source = payload.get("source", "cloud")  # default: cloud/Graph
-
+    source = payload.get("source", "cloud")
     if not ids:
         return jsonify({"error": "No ids provided"}), 400
 
     try:
-        # 1. Fetch document bytes for each id from chosen source
         file_contents = []
         for item_id in ids:
             content_bytes = retrieve_document_content(item_id, source=source)
             encoded = base64.b64encode(content_bytes).decode("utf-8")
             file_contents.append(encoded)
 
-        # 2. Build Perplexity content array with static prompt
         prompt = (
             "You are summarizing a set of Microsoft Word documents from my notes. "
-            "For each attached document, provide a short (2–3 sentence) summary. "
-            "Then provide a brief (3–5 bullet) overall summary that synthesizes key themes "
-            "across all documents."
+            "For each attached document, provide a short summary, then a brief overall summary."
         )
-
         content = [{"type": "text", "text": prompt}]
         for encoded_data in file_contents:
             content.append(
@@ -225,56 +213,71 @@ def api_summarize():
                 }
             )
 
-        # 3. Call Perplexity
         response = PPLX_CLIENT.chat.completions.create(
             model="sonar",
             messages=[{"role": "user", "content": content}],
         )
-
         summary_text = response.choices[0].message.content
         return jsonify({"summary": summary_text, "source": source})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
-    """
-    Body: { "message": "user text" }
-    Returns: { "reply": "assistant text" }
-    Uses a single shared in-memory history (for dev).
-    """
     data = request.get_json(silent=True) or {}
     user_text = (data.get("message") or "").strip()
+    note_ids = data.get("note_ids") or []  # list of OneDrive IDs to attach
+
     if not user_text:
         return jsonify({"error": "Empty message"}), 400
 
-    # 1. Append user message to history
-    CHAT_HISTORY.append({"role": "user", "content": user_text})
+    # 1. Build content with text + attached files (like api_summarize & test_LLM2)[file:235][file:236]
+    content = [
+        {
+            "type": "text",
+            "text": user_text,
+        }
+    ]
 
+    file_contents = []
     try:
-        # 2. Call Perplexity chat completions (same as test_chatbot.py)[file:229]
+        for note_id in note_ids:
+            # use local cache first; fall back to Graph download, same as api_summarize
+            # source="local" lets retrieve_document_content save to note_files if needed
+            content_bytes = retrieve_document_content(note_id, source="local")
+            encoded = base64.b64encode(content_bytes).decode("utf-8")
+            file_contents.append(encoded)
+
+        for encoded_data in file_contents:
+            content.append(
+                {
+                    "type": "file_url",
+                    "file_url": {"url": encoded_data},
+                }
+            )
+    except Exception as e:
+        return jsonify({"error": f"Failed to load attachments: {e}"}), 500
+
+    # 2. Use a single-turn message with rich content (keeps CHAT_HISTORY simple for now)
+    # If you want multi-turn, you can push this content into CHAT_HISTORY instead.
+    try:
         response = PPLX_CLIENT.chat.completions.create(
             model="sonar",
-            messages=CHAT_HISTORY,
+            messages=[
+                {
+                    "role": "user",
+                    "content": content,
+                }
+            ],
         )
     except Exception as e:
-        # Remove last user message on failure
-        CHAT_HISTORY.pop()
         return jsonify({"error": str(e)}), 500
 
-    # 3. Extract assistant reply and citations and store it in history
     reply = response.choices[0].message.content
-    citations = getattr(response, "citations", None)
-    if citations is None:
-        # some clients expose it on response.citations, others under dict-style key
-        citations = getattr(response, "citations", []) or getattr(
-            getattr(response, "__dict__", {}), "get", lambda *_: []
-        )("citations", [])
-
-    CHAT_HISTORY.append({"role": "assistant", "content": reply})
+    citations = getattr(response, "citations", []) or []
 
     return jsonify({"reply": reply, "citations": citations})
-# NOTE: do not put app.run(...) here; app_front.py calls it.
+
+
+# NOTE: app.run is in app_front.py via ReactPy configure
