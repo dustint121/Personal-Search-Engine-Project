@@ -38,10 +38,11 @@ mongo_client = MongoClient(MONGO_URL) if MONGO_URL else None
 db = mongo_client["chatbot_db"] if mongo_client else None
 threads_collection = db["threads"] if db else None  # documents: {_id, title, conversations, created_at, updated_at}
 
-# print("mongo_client:", mongo_client)
-print("MONGO_URL:", MONGO_URL)
-# Notes metadata (catalog only – no local note_files usage)
+# === Usage password for prolonged sessions ===
+USAGE_PASSWORD = os.getenv("USAGE_PASSWORD") or ""
 
+
+# Notes metadata (catalog only – no local note_files usage)
 BASE_DIR = os.path.dirname(__file__)
 NOTES_METADATA_PATH = os.path.join(BASE_DIR, "notes_metadata.json")
 
@@ -417,6 +418,17 @@ def api_threads_delete(thread_id):
 
     return jsonify({"status": "deleted"})
 
+
+@app.route("/api/usage-password", methods=["POST"])
+def api_usage_password():
+    """Check usage unlock password (for front-end gating only)."""
+    payload = request.get_json(silent=True) or {}
+    provided = payload.get("password") or ""
+    # Simple equality check; you can hash if you like
+    ok = bool(USAGE_PASSWORD and provided == USAGE_PASSWORD)
+    if ok:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False}), 401
 
 if __name__ == "__main__":
     app.run(debug=True)

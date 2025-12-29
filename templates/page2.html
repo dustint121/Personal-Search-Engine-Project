@@ -46,7 +46,7 @@
     margin-top: 4px;
     overflow-y: auto;
     padding-right: 4px;
-    flex: 1;
+    max-height: 420px;
   }
   .thread-item {
     display: flex;
@@ -347,6 +347,94 @@
   const threadsListEl = document.getElementById("threads-list");
   const newThreadBtn = document.getElementById("btn-new-thread");
 
+  /* === Perplexity usage limiter (front-end) === */
+  const USAGE_LIMIT = 3;
+  const UNLOCK_MINUTES = 20;
+  const STORAGE_KEY = "pplx_usage_state_v1";
+
+  function loadUsageState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return {count: 0, unlocked_until: 0};
+      const obj = JSON.parse(raw);
+      return {
+        count: obj.count || 0,
+        unlocked_until: obj.unlocked_until || 0,
+      };
+    } catch (_) {
+      return {count: 0, unlocked_until: 0};
+    }
+  }
+
+  function saveUsageState(state) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function nowMs() {
+    return Date.now();
+  }
+
+  function isUnlocked(state) {
+    return state.unlocked_until && state.unlocked_until > nowMs();
+  }
+
+  function incrementUsage() {
+    const state = loadUsageState();
+    if (isUnlocked(state)) {
+      return;
+    }
+    state.count = (state.count || 0) + 1;
+    saveUsageState(state);
+  }
+
+  function usageExceeded() {
+    const state = loadUsageState();
+    if (isUnlocked(state)) {
+      return false;
+    }
+    return (state.count || 0) >= USAGE_LIMIT;
+  }
+
+  async function ensureUsageAllowed() {
+    if (!usageExceeded()) {
+      return true;
+    }
+    const tryUnlock = confirm(
+      `You have reached the free usage limit on this page (${USAGE_LIMIT} Perplexity calls). ` +
+      `Enter the usage password to unlock unlimited access for ${UNLOCK_MINUTES} minutes.`
+    );
+    if (!tryUnlock) {
+      return false;
+    }
+    const pwd = prompt("Enter usage password:");
+    if (pwd === null || !pwd.trim()) {
+      return false;
+    }
+    try {
+      const resp = await fetch("{{ url_for('api_usage_password') }}", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({password: pwd.trim()}),
+      });
+      const data = await resp.json();
+      if (resp.status === 200 && data.ok) {
+        const state = loadUsageState();
+        const ttlMs = UNLOCK_MINUTES * 60 * 1000;
+        state.unlocked_until = nowMs() + ttlMs;
+        saveUsageState(state);
+        alert("Perplexity usage unlocked for the next 20 minutes.");
+        return true;
+      }
+      alert("Incorrect password.");
+      return false;
+    } catch (err) {
+      alert("Error verifying password: " + err);
+      return false;
+    }
+  }
+
+  /* === Chat + threads state === */
+
   let messages = [
     {
       sender: "ai",
@@ -358,13 +446,12 @@
   let isSending = false;
   let allNotes = [];
   let attachedNotes = []; // list of {id, name}
-
   let threads = []; // {id, title, updated_at}
   let currentThreadId = null;
 
   function renderMessages() {
     chatMessagesEl.innerHTML = "";
-    messages.forEach((msg, index) => {
+    messages.forEach((msg) => {
       const row = document.createElement("div");
       row.className = "chat-row " + (msg.sender === "user" ? "user" : "ai");
 
@@ -470,7 +557,6 @@
     let text = "";
     if (Array.isArray(cites) && cites.length > 0) {
       text = cites.map((c, i) => {
-        // c may be a string or an object; show something readable
         if (typeof c === "string") {
           return `${i + 1}. ${c}`;
         }
@@ -481,7 +567,6 @@
         }
       }).join("\n");
     } else if (cites && typeof cites === "object") {
-      // single object
       try {
         text = `1. ${JSON.stringify(cites)}`;
       } catch (_) {
@@ -508,6 +593,11 @@
       alert("Please create or select a thread first.");
       return;
     }
+
+    if (!(await ensureUsageAllowed())) {
+      return;
+    }
+    incrementUsage();
 
     isSending = true;
     chatErrorEl.textContent = "";
@@ -542,7 +632,6 @@
           note_ids: attachedNotes.map(n => n.id),
         });
         renderMessages();
-        // Thread updated_at ordering may change; reload list for freshness
         loadThreads();
       }
     } catch (err) {
@@ -562,14 +651,13 @@
 
   openAttachmentsBtn.addEventListener("click", openAttachmentsModal);
   closeAttachmentsBtn.addEventListener("click", closeAttachmentsModal);
-
   closeCitationsBtn.addEventListener("click", closeCitations);
 
   /* === Threads logic === */
 
   async function loadThreads() {
     try {
-      const resp = await fetch("{{ url_for('api_threads_list') }}".replace("%2F", "/"));
+      const resp = await fetch("{{ url_for('api_threads_list') }}");
       const data = await resp.json();
       if (Array.isArray(data)) {
         threads = data;
@@ -600,7 +688,6 @@
       titleSpan.textContent = thread.title || "Untitled";
 
       item.addEventListener("click", (e) => {
-        // Avoid triggering when clicking the buttons
         if (e.target.closest("button")) return;
         selectThread(thread.id);
       });
@@ -628,10 +715,8 @@
 
       actions.appendChild(renameBtn);
       actions.appendChild(deleteBtn);
-
       item.appendChild(titleSpan);
       item.appendChild(actions);
-
       threadsListEl.appendChild(item);
     });
   }
@@ -655,7 +740,6 @@
         updated_at: data.updated_at,
       });
       currentThreadId = data.id;
-      // Reset messages to opening AI line only
       messages = [
         {
           sender: "ai",
@@ -680,7 +764,6 @@
         alert(data.error || "Failed to load thread");
         return;
       }
-      // Map stored conversations into messages array for rendering
       const convos = data.conversations || [];
       messages = [];
       convos.forEach(c => {
@@ -701,7 +784,6 @@
           });
         }
       });
-      // If empty, show greeting message
       if (!messages.length) {
         messages.push({
           sender: "ai",
@@ -719,7 +801,7 @@
 
   async function renameThread(threadId, oldTitle) {
     const newTitle = prompt("Rename thread:", oldTitle || "Untitled");
-    if (newTitle === null) return; // cancelled
+    if (newTitle === null) return;
     const trimmed = newTitle.trim();
     if (!trimmed) {
       alert("Title cannot be empty.");
@@ -736,7 +818,6 @@
         alert(data.error || "Failed to rename thread");
         return;
       }
-      // Update local list
       threads = threads.map(t => t.id === threadId ? {...t, title: trimmed} : t);
       renderThreadsList();
     } catch (err) {
@@ -778,7 +859,6 @@
 
   newThreadBtn.addEventListener("click", createThread);
 
-  // Initial render
   renderMessages();
   renderAttachmentsBanner();
   loadThreads();
