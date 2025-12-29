@@ -22,7 +22,6 @@
     border: 1px solid #e5e7eb;
     display: flex;
     flex-direction: column;
-    height: 100%;
   }
   .threads-header {
     display: flex;
@@ -468,7 +467,30 @@
   }
 
   function openCitations(cites) {
-    citationsContentEl.textContent = JSON.stringify(cites, null, 2);
+    let text = "";
+    if (Array.isArray(cites) && cites.length > 0) {
+      text = cites.map((c, i) => {
+        // c may be a string or an object; show something readable
+        if (typeof c === "string") {
+          return `${i + 1}. ${c}`;
+        }
+        try {
+          return `${i + 1}. ${JSON.stringify(c)}`;
+        } catch (_) {
+          return `${i + 1}. ${String(c)}`;
+        }
+      }).join("\n");
+    } else if (cites && typeof cites === "object") {
+      // single object
+      try {
+        text = `1. ${JSON.stringify(cites)}`;
+      } catch (_) {
+        text = `1. ${String(cites)}`;
+      }
+    } else {
+      text = "No citations available.";
+    }
+    citationsContentEl.textContent = text;
     citationsModalEl.classList.add("show");
   }
 
