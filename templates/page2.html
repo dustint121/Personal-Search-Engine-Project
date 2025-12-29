@@ -2,6 +2,95 @@
 
 {% block head %}
 <style>
+  .layout-chat {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 800px) {
+    .layout-chat {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Sidebar */
+  .threads-sidebar {
+    background-color: #ffffff;
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.08);
+    border: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .threads-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .threads-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .btn-new-thread {
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid #d1d5db;
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .threads-list {
+    margin-top: 4px;
+    overflow-y: auto;
+    padding-right: 4px;
+    flex: 1;
+  }
+  .thread-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .thread-item.active {
+    background-color: #e5f0ff;
+  }
+  .thread-title-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .thread-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+  }
+  .thread-rename-btn {
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: #6b7280;
+    font-size: 12px;
+  }
+  .thread-delete-btn {
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: #b91c1c;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  /* Chat area (right side) */
   .chat-container {
     display: flex;
     flex-direction: column;
@@ -73,8 +162,8 @@
     gap: 8px;
   }
   .chat-textarea {
-    width: 98%;              /* slightly narrower than container */
-    max-width: 100%;         /* avoid overflow */
+    width: 98%;
+    max-width: 100%;
     min-height: 80px;
     max-height: 200px;
     padding: 10px 12px;
@@ -82,7 +171,7 @@
     border: 1px solid #d1d5db;
     font-size: 14px;
     resize: vertical;
-    box-sizing: border-box;  /* include padding in width */
+    box-sizing: border-box;
   }
   .chat-actions {
     display: flex;
@@ -183,23 +272,35 @@
     Notes Chatbot
   </h1>
 
-  <div class="chat-container">
-    <div id="chat-messages" class="chat-messages"></div>
-
-    <div id="attachments-banner" class="attachments-banner"></div>
-
-    <div class="chat-input-area">
-      <textarea id="chat-input" class="chat-textarea"
-                placeholder="Ask anything about your documents or ideas. (Enter = send, Shift+Enter = newline)"></textarea>
-      <div class="chat-actions">
-        <button id="open-attachments" class="attach-btn">
-          Attach notes
-        </button>
-        <button id="send-message" class="chat-btn">
-          Send
-        </button>
+  <div class="layout-chat">
+    <!-- Sidebar: threads -->
+    <div class="threads-sidebar">
+      <div class="threads-header">
+        <div class="threads-title">Threads</div>
+        <button id="btn-new-thread" class="btn-new-thread">New</button>
       </div>
-      <div id="chat-error" class="error-text"></div>
+      <div id="threads-list" class="threads-list"></div>
+    </div>
+
+    <!-- Main chat panel -->
+    <div class="chat-container">
+      <div id="chat-messages" class="chat-messages"></div>
+
+      <div id="attachments-banner" class="attachments-banner"></div>
+
+      <div class="chat-input-area">
+        <textarea id="chat-input" class="chat-textarea"
+                  placeholder="Ask anything about your documents or ideas. (Enter = send, Shift+Enter = newline)"></textarea>
+        <div class="chat-actions">
+          <button id="open-attachments" class="attach-btn">
+            Attach notes
+          </button>
+          <button id="send-message" class="chat-btn">
+            Send
+          </button>
+        </div>
+        <div id="chat-error" class="error-text"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -244,6 +345,9 @@
   const citationsContentEl = document.getElementById("citations-content");
   const closeCitationsBtn = document.getElementById("close-citations");
 
+  const threadsListEl = document.getElementById("threads-list");
+  const newThreadBtn = document.getElementById("btn-new-thread");
+
   let messages = [
     {
       sender: "ai",
@@ -255,6 +359,9 @@
   let isSending = false;
   let allNotes = [];
   let attachedNotes = []; // list of {id, name}
+
+  let threads = []; // {id, title, updated_at}
+  let currentThreadId = null;
 
   function renderMessages() {
     chatMessagesEl.innerHTML = "";
@@ -375,6 +482,11 @@
       return;
     }
 
+    if (!currentThreadId) {
+      alert("Please create or select a thread first.");
+      return;
+    }
+
     isSending = true;
     chatErrorEl.textContent = "";
 
@@ -394,6 +506,7 @@
         body: JSON.stringify({
           message: text,
           note_ids: attachedNotes.map(n => n.id),
+          thread_id: currentThreadId,
         }),
       });
       const data = await resp.json();
@@ -407,6 +520,8 @@
           note_ids: attachedNotes.map(n => n.id),
         });
         renderMessages();
+        // Thread updated_at ordering may change; reload list for freshness
+        loadThreads();
       }
     } catch (err) {
       chatErrorEl.textContent = "Unexpected error: " + err;
@@ -428,7 +543,222 @@
 
   closeCitationsBtn.addEventListener("click", closeCitations);
 
+  /* === Threads logic === */
+
+  async function loadThreads() {
+    try {
+      const resp = await fetch("{{ url_for('api_threads_list') }}".replace("%2F", "/"));
+      const data = await resp.json();
+      if (Array.isArray(data)) {
+        threads = data;
+        renderThreadsList();
+      }
+    } catch (err) {
+      console.error("Failed to load threads", err);
+    }
+  }
+
+  function renderThreadsList() {
+    threadsListEl.innerHTML = "";
+    if (!threads.length) {
+      const p = document.createElement("p");
+      p.style.fontSize = "12px";
+      p.style.color = "#6b7280";
+      p.textContent = "No threads yet. Click New to start.";
+      threadsListEl.appendChild(p);
+      return;
+    }
+
+    threads.forEach(thread => {
+      const item = document.createElement("div");
+      item.className = "thread-item" + (thread.id === currentThreadId ? " active" : "");
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "thread-title-text";
+      titleSpan.textContent = thread.title || "Untitled";
+
+      item.addEventListener("click", (e) => {
+        // Avoid triggering when clicking the buttons
+        if (e.target.closest("button")) return;
+        selectThread(thread.id);
+      });
+
+      const actions = document.createElement("div");
+      actions.className = "thread-actions";
+
+      const renameBtn = document.createElement("button");
+      renameBtn.className = "thread-rename-btn";
+      renameBtn.textContent = "✎";
+      renameBtn.title = "Rename";
+      renameBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        renameThread(thread.id, thread.title);
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "thread-delete-btn";
+      deleteBtn.textContent = "×";
+      deleteBtn.title = "Delete";
+      deleteBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteThread(thread.id, thread.title);
+      });
+
+      actions.appendChild(renameBtn);
+      actions.appendChild(deleteBtn);
+
+      item.appendChild(titleSpan);
+      item.appendChild(actions);
+
+      threadsListEl.appendChild(item);
+    });
+  }
+
+  async function createThread() {
+    const defaultTitle = "New thread";
+    try {
+      const resp = await fetch("{{ url_for('api_threads_create') }}", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title: defaultTitle}),
+      });
+      const data = await resp.json();
+      if (resp.status !== 201 || data.error) {
+        alert(data.error || "Failed to create thread");
+        return;
+      }
+      threads.unshift({
+        id: data.id,
+        title: data.title,
+        updated_at: data.updated_at,
+      });
+      currentThreadId = data.id;
+      // Reset messages to opening AI line only
+      messages = [
+        {
+          sender: "ai",
+          text: "Hi, I’m your notes chatbot. Ask me anything about your documents or ideas.",
+          citations: [],
+          note_ids: [],
+        }
+      ];
+      renderThreadsList();
+      renderMessages();
+    } catch (err) {
+      alert("Unexpected error creating thread: " + err);
+    }
+  }
+
+  async function selectThread(threadId) {
+    currentThreadId = threadId;
+    try {
+      const resp = await fetch(`/api/threads/${encodeURIComponent(threadId)}`);
+      const data = await resp.json();
+      if (resp.status !== 200 || data.error) {
+        alert(data.error || "Failed to load thread");
+        return;
+      }
+      // Map stored conversations into messages array for rendering
+      const convos = data.conversations || [];
+      messages = [];
+      convos.forEach(c => {
+        if (c.user) {
+          messages.push({
+            sender: "user",
+            text: c.user,
+            citations: [],
+            note_ids: [],
+          });
+        }
+        if (c.assistant) {
+          messages.push({
+            sender: "ai",
+            text: c.assistant,
+            citations: c.citations || [],
+            note_ids: [],
+          });
+        }
+      });
+      // If empty, show greeting message
+      if (!messages.length) {
+        messages.push({
+          sender: "ai",
+          text: "Hi, I’m your notes chatbot. Ask me anything about your documents or ideas.",
+          citations: [],
+          note_ids: [],
+        });
+      }
+      renderThreadsList();
+      renderMessages();
+    } catch (err) {
+      alert("Unexpected error loading thread: " + err);
+    }
+  }
+
+  async function renameThread(threadId, oldTitle) {
+    const newTitle = prompt("Rename thread:", oldTitle || "Untitled");
+    if (newTitle === null) return; // cancelled
+    const trimmed = newTitle.trim();
+    if (!trimmed) {
+      alert("Title cannot be empty.");
+      return;
+    }
+    try {
+      const resp = await fetch(`/api/threads/${encodeURIComponent(threadId)}`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title: trimmed}),
+      });
+      const data = await resp.json();
+      if (resp.status !== 200 || data.error) {
+        alert(data.error || "Failed to rename thread");
+        return;
+      }
+      // Update local list
+      threads = threads.map(t => t.id === threadId ? {...t, title: trimmed} : t);
+      renderThreadsList();
+    } catch (err) {
+      alert("Unexpected error renaming thread: " + err);
+    }
+  }
+
+  async function deleteThread(threadId, title) {
+    const ok = confirm(`Delete thread "${title || "Untitled"}"? This cannot be undone.`);
+    if (!ok) return;
+
+    try {
+      const resp = await fetch(`/api/threads/${encodeURIComponent(threadId)}`, {
+        method: "DELETE",
+      });
+      const data = await resp.json();
+      if (resp.status !== 200 || data.error) {
+        alert(data.error || "Failed to delete thread");
+        return;
+      }
+      threads = threads.filter(t => t.id !== threadId);
+      if (currentThreadId === threadId) {
+        currentThreadId = null;
+        messages = [
+          {
+            sender: "ai",
+            text: "Hi, I’m your notes chatbot. Ask me anything about your documents or ideas.",
+            citations: [],
+            note_ids: [],
+          }
+        ];
+        renderMessages();
+      }
+      renderThreadsList();
+    } catch (err) {
+      alert("Unexpected error deleting thread: " + err);
+    }
+  }
+
+  newThreadBtn.addEventListener("click", createThread);
+
+  // Initial render
   renderMessages();
   renderAttachmentsBanner();
+  loadThreads();
 </script>
 {% endblock %}
