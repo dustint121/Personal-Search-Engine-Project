@@ -77,7 +77,7 @@ Go to https://cloud.mongodb.com/ and log in with account.
 
 >USAGE_PASSWORD=**[any string works]**
 
-2. Run
+2. Run with python 3.12 (optional: use virtual environment)
 >pip install -r requirements.txt
 
 3. Run
