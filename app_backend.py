@@ -3,6 +3,8 @@ import os
 import json
 import base64
 from datetime import datetime
+import re
+import random
 
 import requests
 from flask import Flask, jsonify, request, render_template
@@ -17,6 +19,8 @@ from get_authentication import load_cache, get_token
 load_dotenv()
 
 app = Flask(__name__)
+
+USAGE_PASSWORD = os.getenv("USAGE_PASSWORD") or ""
 
 # === OneDrive / Microsoft Graph configuration ===
 
@@ -36,21 +40,108 @@ PPLX_CLIENT = Perplexity(api_key=PERPLEXITY_API_KEY, base_url="https://api.perpl
 MONGO_URL = os.getenv("MONGO_URL")
 mongo_client = MongoClient(MONGO_URL) if MONGO_URL else None
 db = mongo_client["chatbot_db"] if mongo_client else None
-threads_collection = db["threads"] if db else None  # documents: {_id, title, conversations, created_at, updated_at}
+threads_collection = db["threads"] if db else None  # {_id, title, conversations, created_at, updated_at}
 
-# === Usage password for prolonged sessions ===
-USAGE_PASSWORD = os.getenv("USAGE_PASSWORD") or ""
+# Notes metadata
 
-
-# Notes metadata (catalog only – no local note_files usage)
 BASE_DIR = os.path.dirname(__file__)
 NOTES_METADATA_PATH = os.path.join(BASE_DIR, "notes_metadata.json")
+
+# === ELIZA implementation (from test_chat_eliza.py) ===
+
+REFLECTIONS = {
+    "am": "are",
+    "was": "were",
+    "i": "you",
+    "i'd": "you would",
+    "i've": "you have",
+    "i'll": "you will",
+    "my": "your",
+    "you": "me",
+    "you're": "I'm",
+    "you've": "I've",
+    "you'll": "I'll",
+    "your": "my",
+    "yours": "mine",
+    "me": "you",
+}
+
+
+def reflect(fragment: str) -> str:
+    words = fragment.lower().split()
+    reflected = []
+    for w in words:
+        reflected.append(REFLECTIONS.get(w, w))
+    return " ".join(reflected)
+
+
+PAIRS = [
+    (r".*\babout\b(.*)", [
+        "What about %1?",
+        "How do you feel about %1?",
+        "Why are you thinking about %1 right now?",
+    ]),
+    (r"hi|hello|hey", [
+        "Hello. How are you feeling today?",
+        "Hi there. What would you like to talk about?"
+    ]),
+    (r"my name is (.*)", [
+        "Nice to meet you, %1.",
+        "Hello %1, how are you today?"
+    ]),
+    (r"i feel (.*)", [
+        "Why do you feel %1?",
+        "Do you often feel %1?",
+        "What makes you feel %1?"
+    ]),
+    (r"i am (.*)", [
+        "How long have you been %1?",
+        "Why do you say you are %1?"
+    ]),
+    (r"(.*)mother(.*)", [
+        "Tell me more about your mother.",
+        "How is your relationship with your mother?"
+    ]),
+    (r"(.*)father(.*)", [
+        "Tell me more about your father.",
+        "Do you get along with your father?"
+    ]),
+    (r"(.*)because (.*)", [
+        "Is that the real reason?",
+        "What other reasons come to mind?"
+    ]),
+    (r"(.*)\?", [
+        "Why do you ask that?",
+        "What do you think?",
+        "How would you answer that yourself?"
+    ]),
+    (r"(.*)", [
+        "Please tell me more.",
+        "Can you elaborate on that?",
+        "How does that make you feel?",
+        "Let's talk more about that."
+    ]),
+]
+
+
+def eliza_respond(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return "Please go on."
+    for pattern, responses in PAIRS:
+        m = re.match(pattern, text, re.IGNORECASE)
+        if m:
+            response = random.choice(responses)
+            for i in range(1, len(m.groups()) + 1):
+                group = m.group(i)
+                response = response.replace(f"%{i}", reflect(group))
+            return response
+    return "Please go on."
 
 
 # === Helpers ===
 
 def get_graph_headers():
-    """Acquire a Graph access token and return Authorization headers."""
     cache = load_cache()
     msal_app = PublicClientApplication(
         client_id=CLIENT_ID,
@@ -62,7 +153,6 @@ def get_graph_headers():
 
 
 def search_onedrive_docx(query: str):
-    """Search OneDrive for .docx files whose name matches the query."""
     if not query:
         return []
     headers = get_graph_headers()
@@ -112,7 +202,6 @@ def append_note_metadata_if_missing(note_id: str, name: str = "", web_url: str =
 
 
 def retrieve_document_content(item_id: str) -> bytes:
-    """Retrieve a document's bytes directly from Graph (no local note_files folder)."""
     headers = get_graph_headers()
     url = (
         f"https://graph.microsoft.com/v1.0/drives/"
@@ -128,7 +217,6 @@ def retrieve_document_content(item_id: str) -> bytes:
 
 
 def serialize_thread(doc):
-    """Convert a Mongo thread document to JSON-safe dict."""
     return {
         "id": str(doc["_id"]),
         "title": doc.get("title", "Untitled"),
@@ -138,21 +226,25 @@ def serialize_thread(doc):
     }
 
 
-# === HTML pages (Flask + Jinja) ===
+# === HTML pages ===
 
 @app.route("/")
 def page1():
-    """Search / summarize page."""
     return render_template("page1.html")
 
 
 @app.route("/chat")
 def page2():
-    """Chat page with threads sidebar."""
     return render_template("page2.html")
 
 
-# === JSON API: search/summarize/chat/auth ===
+@app.route("/eliza")
+def page3():
+    return render_template("page3.html")
+
+
+# === APIs: search / summarize / chat / auth ===
+# (same as your current version; omitted for brevity except where new)
 
 @app.route("/api/search")
 def api_search():
@@ -168,11 +260,55 @@ def api_notes_metadata():
     return jsonify(load_notes_metadata())
 
 
+@app.route("/api/reload-notes", methods=["POST"])
+def api_reload_notes():
+    """
+    Refresh notes_metadata.json by searching OneDrive for 'notes' *.docx files.
+    """
+    try:
+        cache = load_cache()
+        msal_app = PublicClientApplication(
+            client_id=CLIENT_ID,
+            authority=AUTHORITY,
+            token_cache=cache,
+        )
+        access_token = get_token(msal_app)
+        if not access_token:
+            return jsonify({"error": "No Microsoft Graph access token. Please authorize on Page 1 first."}), 401
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        url = (
+            "https://graph.microsoft.com/v1.0/me/drive/root/"
+            "search(q='notes')"
+            "?$filter=endswith(name,'.docx')"
+            "&$select=name,id,webUrl"
+        )
+
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        list_of_notes = data.get("value", [])
+
+        # write list of notes to json file
+        with open(NOTES_METADATA_PATH, "w") as f:
+            json.dump(list_of_notes, f, indent=2)
+
+        return jsonify(
+            {
+                "status": "ok",
+                "count": len(list_of_notes),
+                "message": f"Reloaded notes metadata with {len(list_of_notes)} items.",
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/summarize", methods=["POST"])
 def api_summarize():
     payload = request.get_json(silent=True) or {}
     ids = payload.get("ids", [])
-
     if not ids:
         return jsonify({"error": "No ids provided"}), 400
 
@@ -191,10 +327,7 @@ def api_summarize():
         content = [{"type": "text", "text": prompt}]
         for encoded_data in file_contents:
             content.append(
-                {
-                    "type": "file_url",
-                    "file_url": {"url": encoded_data},
-                }
+                {"type": "file_url", "file_url": {"url": encoded_data}}
             )
 
         response = PPLX_CLIENT.chat.completions.create(
@@ -212,13 +345,12 @@ def api_summarize():
 def api_chat():
     data = request.get_json(silent=True) or {}
     user_text = (data.get("message") or "").strip()
-    note_ids = data.get("note_ids") or []  # list of OneDrive IDs to attach
+    note_ids = data.get("note_ids") or []
     thread_id = data.get("thread_id")
 
     if not user_text:
         return jsonify({"error": "Empty message"}), 400
 
-    # Build content with text + attached files (directly from Graph)
     content = [{"type": "text", "text": user_text}]
     file_contents = []
 
@@ -230,10 +362,7 @@ def api_chat():
 
         for encoded_data in file_contents:
             content.append(
-                {
-                    "type": "file_url",
-                    "file_url": {"url": encoded_data},
-                }
+                {"type": "file_url", "file_url": {"url": encoded_data}}
             )
     except Exception as e:
         return jsonify({"error": f"Failed to load attachments: {e}"}), 500
@@ -249,7 +378,6 @@ def api_chat():
     reply = response.choices[0].message.content
     citations = getattr(response, "citations", []) or []
 
-    # Optionally store in thread
     if threads_collection and thread_id:
         try:
             threads_collection.update_one(
@@ -266,7 +394,6 @@ def api_chat():
                 },
             )
         except Exception:
-            # Do not fail chat if persistence fails
             pass
 
     return jsonify({"reply": reply, "citations": citations})
@@ -274,10 +401,6 @@ def api_chat():
 
 @app.route("/api/auth-status")
 def api_auth_status():
-    """
-    Check if a valid Graph token is available.
-    If not, start device flow and return the 'Go to ... enter code ...' message.
-    """
     try:
         cache = load_cache()
         msal_app = PublicClientApplication(
@@ -285,8 +408,6 @@ def api_auth_status():
             authority=AUTHORITY,
             token_cache=cache,
         )
-
-        # Try silent first
         accounts = msal_app.get_accounts()
         if accounts:
             result = msal_app.acquire_token_silent(SCOPES, account=accounts[0])
@@ -298,7 +419,6 @@ def api_auth_status():
                     }
                 )
 
-        # No valid token: initiate device flow but DO NOT block waiting for user.
         flow = msal_app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             return jsonify(
@@ -312,20 +432,27 @@ def api_auth_status():
             f"Go to {flow['verification_uri']} and enter code: {flow['user_code']}\n"
             "Then refresh this page."
         )
-
         return jsonify({"status": "needs_auth", "message": verify_msg})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# === JSON API: threads (MongoDB) ===
+@app.route("/api/usage-password", methods=["POST"])
+def api_usage_password():
+    payload = request.get_json(silent=True) or {}
+    provided = payload.get("password") or ""
+    ok = bool(USAGE_PASSWORD and provided == USAGE_PASSWORD)
+    if ok:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False}), 401
+
+
+# === Threads APIs (unchanged from your current version) ===
 
 @app.route("/api/threads", methods=["GET"])
 def api_threads_list():
-    """List all threads (id, title, updated_at)."""
     if not threads_collection:
         return jsonify([])
-
     docs = list(
         threads_collection.find({}, {"conversations": 0}).sort("updated_at", -1)
     )
@@ -342,7 +469,6 @@ def api_threads_list():
 
 @app.route("/api/threads", methods=["POST"])
 def api_threads_create():
-    """Create a new thread with optional title."""
     if not threads_collection:
         return jsonify({"error": "Threads storage not configured"}), 500
 
@@ -362,73 +488,64 @@ def api_threads_create():
 
 @app.route("/api/threads/<thread_id>", methods=["GET"])
 def api_threads_get(thread_id):
-    """Get a full thread with conversations."""
     if not threads_collection:
         return jsonify({"error": "Threads storage not configured"}), 500
-
     try:
         doc = threads_collection.find_one({"_id": ObjectId(thread_id)})
     except Exception:
         return jsonify({"error": "Invalid thread id"}), 400
-
     if not doc:
         return jsonify({"error": "Thread not found"}), 404
-
     return jsonify(serialize_thread(doc))
 
 
 @app.route("/api/threads/<thread_id>", methods=["PUT"])
 def api_threads_rename(thread_id):
-    """Rename a thread."""
     if not threads_collection:
         return jsonify({"error": "Threads storage not configured"}), 500
-
     payload = request.get_json(silent=True) or {}
     new_title = (payload.get("title") or "").strip()
     if not new_title:
         return jsonify({"error": "Title cannot be empty"}), 400
-
     try:
         result = threads_collection.update_one(
             {"_id": ObjectId(thread_id)},
-            {"$set": {"title": new_title, "updated_at": datetime.utcnow()}},
+            {"$set": {"title": new_title, "updated_at": datetime.now(datetime.UTC)}},
         )
     except Exception:
         return jsonify({"error": "Invalid thread id"}), 400
-
     if result.matched_count == 0:
         return jsonify({"error": "Thread not found"}), 404
-
     return jsonify({"status": "ok"})
 
 
 @app.route("/api/threads/<thread_id>", methods=["DELETE"])
 def api_threads_delete(thread_id):
-    """Delete a thread."""
     if not threads_collection:
         return jsonify({"error": "Threads storage not configured"}), 500
-
     try:
         result = threads_collection.delete_one({"_id": ObjectId(thread_id)})
     except Exception:
         return jsonify({"error": "Invalid thread id"}), 400
-
     if result.deleted_count == 0:
         return jsonify({"error": "Thread not found"}), 404
-
     return jsonify({"status": "deleted"})
 
 
-@app.route("/api/usage-password", methods=["POST"])
-def api_usage_password():
-    """Check usage unlock password (for front-end gating only)."""
-    payload = request.get_json(silent=True) or {}
-    provided = payload.get("password") or ""
-    # Simple equality check; you can hash if you like
-    ok = bool(USAGE_PASSWORD and provided == USAGE_PASSWORD)
-    if ok:
-        return jsonify({"ok": True})
-    return jsonify({"ok": False}), 401
+# === ELIZA API ===
+
+@app.route("/api/eliza-chat", methods=["POST"])
+def api_eliza_chat():
+    data = request.get_json(silent=True) or {}
+    user_text = (data.get("message") or "").strip()
+    if not user_text:
+        return jsonify({"error": "Empty message"}), 400
+    reply = eliza_respond(user_text)
+    return jsonify({"reply": reply})
+
+
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)
